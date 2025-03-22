@@ -1,249 +1,536 @@
-local MacLib = loadstring(game:HttpGet("https://github.com/biggaboy212/Maclib/releases/latest/download/maclib.txt"))()
+local player = game.Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 
--- Create the main window
-local Window = MacLib:Window({
-    Title = "Night RBX",
-    Subtitle = "BETA | V0.1",
-    Size = UDim2.fromOffset(868, 650),
-    DragStyle = 3, -- Full top-bar dragging for mobile
-    DisabledWindowControls = {},
-    ShowUserInfo = true,
-    Keybind = Enum.KeyCode.RightControl,
-    AcrylicBlur = true
-})
+local runService = game:GetService("RunService")
+local userInput = game:GetService("UserInputService")
+local tweenService = game:GetService("TweenService")
+local guiService = game:GetService("GuiService")
 
--- Set config folder
-MacLib:SetFolder("NightRBX_Configs")
+-- Variables
+local autoFarm = false
+local HIT_RANGE = 10
+local gui = nil
+local draggedUI = false
+local mainFrame = nil
+local dragging = false
+local dragStart = nil
+local startPos = nil
 
--- Find the main UI frame dynamically
-local mainFrame
-task.spawn(function()
-    local maxAttempts = 10
-    local attempts = 0
-    while attempts < maxAttempts do
-        for _, obj in pairs(Window.Frame:GetDescendants()) do
-            if obj:IsA("Frame") and obj.Size == UDim2.fromOffset(868, 650) then
-                mainFrame = obj
-                break
-            end
-        end
-        if mainFrame then break end
-        attempts += 1
-        task.wait(0.1)
-    end
-
-    if mainFrame then
-        mainFrame.Position = UDim2.new(0.5, -434, 0.5, -325) -- Center based on size
-        mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-    else
-        warn("Could not find main UI frame; positioning and dragging may not work.")
-    end
-end)
-
--- Create TabGroup
-local TabGroup = Window:TabGroup()
-
--- Combat Tab
-local CombatTab = TabGroup:Tab({
-    Name = "Combat"
-})
-CombatTab:Select() -- Make Combat tab active by default
-
--- Config Tab
-local ConfigTab = TabGroup:Tab({
-    Name = "Config"
-})
-
--- Combat Tab Sections
-local CombatSections = {
-    LeftTop = CombatTab:Section({Side = "Left"}),
-    LeftBottom = CombatTab:Section({Side = "Left"}),
-    RightTop = CombatTab:Section({Side = "Right"}),
-    RightBottom = CombatTab:Section({Side = "Right"})
-}
-
--- Config Tab Section
-local ConfigSection = ConfigTab:Section({Side = "Left"})
-
--- Add Config Settings
-ConfigSection:Button({
-    Name = "Save Config",
-    Callback = function()
-        MacLib:SaveConfig("config")
-        Window:Notify({
-            Title = "Config",
-            Description = "Settings saved"
-        })
-    end
-})
-
-ConfigSection:Button({
-    Name = "Load Config",
-    Callback = function()
-        MacLib:LoadConfig("config")
-        Window:Notify({
-            Title = "Config",
-            Description = "Settings loaded"
-        })
-    end
-})
-
-ConfigSection:Button({
-    Name = "Refresh Config List",
-    Callback = function()
-        local configList = MacLib:RefreshConfigList()
-        Window:Notify({
-            Title = "Config List",
-            Description = "Configs: " .. table.concat(configList, ", ")
-        })
-    end
-})
-
-ConfigSection:Button({
-    Name = "Load Auto Config",
-    Callback = function()
-        MacLib:LoadAutoLoadConfig()
-        Window:Notify({
-            Title = "Auto Load",
-            Description = "Autoload config applied"
-        })
-    end
-})
-
--- Combat Sections Example Elements
-CombatSections.LeftTop:Button({
-    Name = "Attack",
-    Callback = function()
-        print("Attacking.")
-        Window:Notify({
-            Title = "Combat",
-            Description = "Attack triggered"
-        })
-    end
-})
-
-CombatSections.LeftBottom:Slider({
-    Name = "Attack Range",
-    Default = 10,
-    Minimum = 5,
-    Maximum = 20,
-    DisplayMethod = "Percent",
-    Callback = function(Value)
-        print("Attack range set to: " .. Value)
-    end
-}, "AttackRange")
-
-CombatSections.RightTop:Toggle({
-    Name = "Auto Attack",
-    Default = false,
-    Callback = function(value)
-        Window:Notify({
-            Title = "Auto Attack",
-            Description = value and "Enabled" or "Disabled"
-        })
-    end
-}, "AutoAttack")
-
-CombatSections.RightBottom:Button({
-    Name = "Use Skill",
-    Callback = function()
-        print("Using skill.")
-        Window:Notify({
-            Title = "Combat",
-            Description = "Skill activated"
-        })
-    end
-})
-
--- Create Toggle Button for Mobile Players
-local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
-
--- Check if ScreenGui already exists and remove it to prevent duplicates
-if PlayerGui:FindFirstChild("UIToggleGui") then
-    PlayerGui:FindFirstChild("UIToggleGui"):Destroy()
+-- Core functionality
+local function isArcher(mob)
+    return mob.Name:lower():find("archer") ~= nil 
 end
 
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "UIToggleGui"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = PlayerGui
-
-local ToggleButton = Instance.new("ImageButton")
-ToggleButton.Size = UDim2.new(0, 50, 0, 50) -- Circular size
-ToggleButton.Position = UDim2.new(0.5, -25, 0, 10) -- Centered at top
-ToggleButton.AnchorPoint = Vector2.new(0.5, 0)
-ToggleButton.BackgroundTransparency = 0.2
-ToggleButton.Parent = ScreenGui
-
--- Make it circular with UIStroke and UICorner
-local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(1, 0) -- Full circle
-UICorner.Parent = ToggleButton
-
-local UIStroke = Instance.new("UIStroke")
-UIStroke.Thickness = 2
-UIStroke.Color = Color3.fromRGB(255, 255, 255)
-UIStroke.Parent = ToggleButton
-
-ToggleButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50) -- Gray fill
-
--- Toggle UI visibility
-local uiVisible = true
-ToggleButton.MouseButton1Click:Connect(function()
-    uiVisible = not uiVisible
-    if mainFrame then
-        mainFrame.Visible = uiVisible
-        ToggleButton.BackgroundColor3 = uiVisible and Color3.fromRGB(50, 50, 50) or Color3.fromRGB(150, 150, 150)
-    else
-        warn("Main frame not found; UI toggle may not work.")
-    end
-end)
-
--- Ensure mobile dragging works
-local UserInputService = game:GetService("UserInputService")
-local dragging = false -- Fixed: Initialize as false
-local dragStart
-local startPos
-
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.UserInputType == Enum.UserInputType.Touch and input.Position and mainFrame then
-        local touchPos = Vector2.new(input.Position.X, input.Position.Y)
-        local framePos = mainFrame.AbsolutePosition
-        local frameSize = mainFrame.AbsoluteSize
-        if touchPos.X >= framePos.X and touchPos.X <= framePos.X + frameSize.X and
-           touchPos.Y >= framePos.Y and touchPos.Y <= framePos.Y + 50 then -- Top 50 studs
-            dragging = true
-            dragStart = touchPos
-            startPos = mainFrame.Position
+local function getClosestMob()
+    local closestMob = nil
+    local closestDistance = math.huge
+    for _, mob in ipairs(workspace.Characters:GetChildren()) do
+        if mob:IsA("Model") and mob ~= character and mob:FindFirstChild("HumanoidRootPart") then
+            local dist = (mob.HumanoidRootPart.Position - humanoidRootPart.Position).Magnitude
+            if dist < closestDistance then
+                closestDistance = dist
+                closestMob = mob
+            end
         end
     end
-end)
+    return closestMob
+end
 
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and input.UserInputType == Enum.UserInputType.Touch and dragStart and startPos and mainFrame then
-        local touchPos = Vector2.new(input.Position.X, input.Position.Y)
-        local delta = touchPos - dragStart
-        mainFrame.Position = UDim2.new(
-            startPos.X.Scale,
-            startPos.X.Offset + delta.X,
-            startPos.Y.Scale,
-            startPos.Y.Offset + delta.Y
+local function teleportUnderEnemy(mob)
+    if humanoidRootPart and mob:FindFirstChild("HumanoidRootPart") then
+        local yOffset = 3
+        -- Position above mob and face downward toward it
+        local targetCFrame = mob.HumanoidRootPart.CFrame 
+            * CFrame.new(0, yOffset, 0)
+            * CFrame.Angles(math.rad(-90), 0, 0) -- Changed from 90 to -90 to face downward
+        humanoidRootPart.CFrame = targetCFrame
+    end
+end
+
+local function isInRange(mob, range)
+    local mobRootPart = mob:FindFirstChild("HumanoidRootPart")
+    if not mobRootPart or not humanoidRootPart then return false end
+    return (mobRootPart.Position - humanoidRootPart.Position).Magnitude <= range
+end
+
+local function equipWeapon()
+    local args = {
+        [1] = "Equip/UnEquip"
+    }
+    game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("WeaponsEvent"):FireServer(unpack(args))
+end
+
+local function useSkill(skillName)
+    local args = {
+        [1] = { ["Skill"] = skillName, ["Function"] = "Activate" },
+        [2] = humanoidRootPart.Position,
+        [3] = true
+    }
+    game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Skill"):FireServer(unpack(args))
+end
+
+local function attack()
+    task.spawn(function()
+        while autoFarm do
+            local mob = getClosestMob()
+            if mob then
+                if not isInRange(mob, HIT_RANGE) then
+                    teleportUnderEnemy(mob)
+                end
+                humanoidRootPart.Anchored = true
+                game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Combat")
+                    :FireServer("Attack")
+                useSkill("FlurryOfBlows")
+                useSkill("BloodyCut")
+                useSkill("Invisibility")
+            end
+            task.wait(0.5)
+        end
+        
+        if not autoFarm then
+            humanoidRootPart.Anchored = false
+        end
+    end)
+end
+
+local function stopAutoFarm()
+    autoFarm = false
+    humanoidRootPart.Anchored = false
+    updateStatusIndicator()
+end
+
+local function startAutoFarm()
+    autoFarm = true
+    equipWeapon()
+    attack()
+    updateStatusIndicator()
+end
+
+local function enableNoFall()
+    runService.Stepped:Connect(function()
+        if autoFarm and humanoidRootPart then
+            humanoidRootPart.Velocity = Vector3.new(0, 0, 0)
+        end
+    end)
+end
+
+-- GUI Creation
+local function createGui()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "AutoFarmGUI"
+    screenGui.ResetOnSpawn = false
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    
+    -- Prevent UI from being hidden in CoreGui
+    if syn and syn.protect_gui then
+        syn.protect_gui(screenGui)
+        screenGui.Parent = game:GetService("CoreGui")
+    elseif gethui then
+        screenGui.Parent = gethui()
+    else
+        screenGui.Parent = player:WaitForChild("PlayerGui")
+    end
+    
+    -- Create toggle button
+    local toggleButton = Instance.new("ImageButton")
+    toggleButton.Name = "ToggleButton"
+    toggleButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    toggleButton.BackgroundTransparency = 0.3
+    toggleButton.BorderSizePixel = 0
+    toggleButton.Position = UDim2.new(0.5, -25, 0, 10)
+    toggleButton.Size = UDim2.new(0, 50, 0, 50)
+    toggleButton.Image = "rbxassetid://3926307971"
+    toggleButton.ImageRectOffset = Vector2.new(404, 44)
+    toggleButton.ImageRectSize = Vector2.new(36, 36)
+    toggleButton.ImageColor3 = Color3.fromRGB(255, 255, 255)
+    toggleButton.AnchorPoint = Vector2.new(0.5, 0)
+    toggleButton.Parent = screenGui
+    
+    -- Add corner to toggle button
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(1, 0)
+    corner.Parent = toggleButton
+    
+    -- Add stroke to toggle button
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(255, 255, 255)
+    stroke.Thickness = 2
+    stroke.Parent = toggleButton
+    
+    -- Create main frame
+    mainFrame = Instance.new("Frame")
+    mainFrame.Name = "MainFrame"
+    mainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    mainFrame.BorderSizePixel = 0
+    mainFrame.Position = UDim2.new(0.5, -150, 0, 70)
+    mainFrame.Size = UDim2.new(0, 300, 0, 200)
+    mainFrame.Visible = false
+    mainFrame.AnchorPoint = Vector2.new(0.5, 0)
+    mainFrame.Parent = screenGui
+    
+    -- Add corner to main frame
+    local frameCorner = Instance.new("UICorner")
+    frameCorner.CornerRadius = UDim.new(0, 10)
+    frameCorner.Parent = mainFrame
+    
+    -- Create title bar
+    local titleBar = Instance.new("Frame")
+    titleBar.Name = "TitleBar"
+    titleBar.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    titleBar.BorderSizePixel = 0
+    titleBar.Size = UDim2.new(1, 0, 0, 40)
+    titleBar.Parent = mainFrame
+    
+    -- Add corner to title bar
+    local titleCorner = Instance.new("UICorner")
+    titleCorner.CornerRadius = UDim.new(0, 10)
+    titleCorner.Parent = titleBar
+    
+    -- Create title text
+    local titleText = Instance.new("TextLabel")
+    titleText.Name = "TitleText"
+    titleText.BackgroundTransparency = 1
+    titleText.Position = UDim2.new(0, 15, 0, 0)
+    titleText.Size = UDim2.new(1, -30, 1, 0)
+    titleText.Font = Enum.Font.GothamBold
+    titleText.Text = "Auto Farm"
+    titleText.TextColor3 = Color3.fromRGB(255, 255, 255)
+    titleText.TextSize = 18
+    titleText.TextXAlignment = Enum.TextXAlignment.Left
+    titleText.Parent = titleBar
+    
+    -- Fix corner for title bar (bottom corners)
+    local bottomFrame = Instance.new("Frame")
+    bottomFrame.Name = "BottomFrame"
+    bottomFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    bottomFrame.BorderSizePixel = 0
+    bottomFrame.Position = UDim2.new(0, 0, 1, -10)
+    bottomFrame.Size = UDim2.new(1, 0, 0, 10)
+    bottomFrame.Parent = titleBar
+    
+    -- Create close button
+    local closeButton = Instance.new("TextButton")
+    closeButton.Name = "CloseButton"
+    closeButton.BackgroundTransparency = 1
+    closeButton.Position = UDim2.new(1, -40, 0, 0)
+    closeButton.Size = UDim2.new(0, 40, 0, 40)
+    closeButton.Font = Enum.Font.GothamBold
+    closeButton.Text = "X"
+    closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeButton.TextSize = 18
+    closeButton.Parent = titleBar
+    
+    -- Create content container
+    local contentFrame = Instance.new("Frame")
+    contentFrame.Name = "ContentFrame"
+    contentFrame.BackgroundTransparency = 1
+    contentFrame.Position = UDim2.new(0, 0, 0, 40)
+    contentFrame.Size = UDim2.new(1, 0, 1, -40)
+    contentFrame.Parent = mainFrame
+    
+    -- Create toggle switch frame
+    local toggleFrame = Instance.new("Frame")
+    toggleFrame.Name = "ToggleFrame"
+    toggleFrame.BackgroundTransparency = 1
+    toggleFrame.Position = UDim2.new(0, 15, 0, 15)
+    toggleFrame.Size = UDim2.new(1, -30, 0, 40)
+    toggleFrame.Parent = contentFrame
+    
+    -- Create toggle label
+    local toggleLabel = Instance.new("TextLabel")
+    toggleLabel.Name = "ToggleLabel"
+    toggleLabel.BackgroundTransparency = 1
+    toggleLabel.Position = UDim2.new(0, 0, 0, 0)
+    toggleLabel.Size = UDim2.new(0, 120, 1, 0)
+    toggleLabel.Font = Enum.Font.Gotham
+    toggleLabel.Text = "Auto Farm"
+    toggleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    toggleLabel.TextSize = 16
+    toggleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    toggleLabel.Parent = toggleFrame
+    
+    -- Create toggle button background
+    local toggleBg = Instance.new("Frame")
+    toggleBg.Name = "ToggleBg"
+    toggleBg.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    toggleBg.BorderSizePixel = 0
+    toggleBg.Position = UDim2.new(1, -60, 0.5, -15)
+    toggleBg.Size = UDim2.new(0, 60, 0, 30)
+    toggleBg.Parent = toggleFrame
+    
+    -- Add corner to toggle background
+    local toggleBgCorner = Instance.new("UICorner")
+    toggleBgCorner.CornerRadius = UDim.new(0, 15)
+    toggleBgCorner.Parent = toggleBg
+    
+    -- Create toggle indicator
+    local toggleIndicator = Instance.new("Frame")
+    toggleIndicator.Name = "ToggleIndicator"
+    toggleIndicator.BackgroundColor3 = Color3.fromRGB(255, 55, 55)
+    toggleIndicator.BorderSizePixel = 0
+    toggleIndicator.Position = UDim2.new(0, 5, 0.5, -10)
+    toggleIndicator.Size = UDim2.new(0, 20, 0, 20)
+    toggleIndicator.Parent = toggleBg
+    
+    -- Add corner to toggle indicator
+    local toggleIndicatorCorner = Instance.new("UICorner")
+    toggleIndicatorCorner.CornerRadius = UDim.new(1, 0)
+    toggleIndicatorCorner.Parent = toggleIndicator
+    
+    -- Create toggle button
+    local toggleHitbox = Instance.new("TextButton")
+    toggleHitbox.Name = "ToggleHitbox"
+    toggleHitbox.BackgroundTransparency = 1
+    toggleHitbox.Size = UDim2.new(1, 0, 1, 0)
+    toggleHitbox.Font = Enum.Font.SourceSans
+    toggleHitbox.Text = ""
+    toggleHitbox.TextColor3 = Color3.fromRGB(0, 0, 0)
+    toggleHitbox.TextSize = 14
+    toggleHitbox.Parent = toggleBg
+    
+    -- Create status label
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Name = "StatusLabel"
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Position = UDim2.new(0, 15, 0, 70)
+    statusLabel.Size = UDim2.new(1, -30, 0, 30)
+    statusLabel.Font = Enum.Font.Gotham
+    statusLabel.Text = "Status: OFF"
+    statusLabel.TextColor3 = Color3.fromRGB(255, 75, 75)
+    statusLabel.TextSize = 16
+    statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+    statusLabel.Parent = contentFrame
+    
+    -- Create hit range slider container
+    local hitRangeFrame = Instance.new("Frame")
+    hitRangeFrame.Name = "HitRangeFrame"
+    hitRangeFrame.BackgroundTransparency = 1
+    hitRangeFrame.Position = UDim2.new(0, 15, 0, 110)
+    hitRangeFrame.Size = UDim2.new(1, -30, 0, 60)
+    hitRangeFrame.Parent = contentFrame
+    
+    -- Hit range label
+    local hitRangeLabel = Instance.new("TextLabel")
+    hitRangeLabel.Name = "HitRangeLabel"
+    hitRangeLabel.BackgroundTransparency = 1
+    hitRangeLabel.Position = UDim2.new(0, 0, 0, 0)
+    hitRangeLabel.Size = UDim2.new(1, 0, 0, 20)
+    hitRangeLabel.Font = Enum.Font.Gotham
+    hitRangeLabel.Text = "Hit Range: " .. HIT_RANGE
+    hitRangeLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    hitRangeLabel.TextSize = 16
+    hitRangeLabel.TextXAlignment = Enum.TextXAlignment.Left
+    hitRangeLabel.Parent = hitRangeFrame
+    
+    -- Hit range slider background
+    local hitRangeSliderBg = Instance.new("Frame")
+    hitRangeSliderBg.Name = "SliderBg"
+    hitRangeSliderBg.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    hitRangeSliderBg.BorderSizePixel = 0
+    hitRangeSliderBg.Position = UDim2.new(0, 0, 0, 30)
+    hitRangeSliderBg.Size = UDim2.new(1, 0, 0, 10)
+    hitRangeSliderBg.Parent = hitRangeFrame
+    
+    -- Add corner to slider background
+    local sliderBgCorner = Instance.new("UICorner")
+    sliderBgCorner.CornerRadius = UDim.new(0, 5)
+    sliderBgCorner.Parent = hitRangeSliderBg
+    
+    -- Hit range slider fill
+    local hitRangeSliderFill = Instance.new("Frame")
+    hitRangeSliderFill.Name = "SliderFill"
+    hitRangeSliderFill.BackgroundColor3 = Color3.fromRGB(85, 170, 255)
+    hitRangeSliderFill.BorderSizePixel = 0
+    hitRangeSliderFill.Size = UDim2.new(HIT_RANGE/20, 0, 1, 0)
+    hitRangeSliderFill.Parent = hitRangeSliderBg
+    
+    -- Add corner to slider fill
+    local sliderFillCorner = Instance.new("UICorner")
+    sliderFillCorner.CornerRadius = UDim.new(0, 5)
+    sliderFillCorner.Parent = hitRangeSliderFill
+    
+    -- Hit range slider knob
+    local hitRangeSliderKnob = Instance.new("Frame")
+    hitRangeSliderKnob.Name = "SliderKnob"
+    hitRangeSliderKnob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    hitRangeSliderKnob.BorderSizePixel = 0
+    hitRangeSliderKnob.Position = UDim2.new(HIT_RANGE/20, 0, 0.5, -10)
+    hitRangeSliderKnob.Size = UDim2.new(0, 20, 0, 20)
+    hitRangeSliderKnob.ZIndex = 2
+    hitRangeSliderKnob.Parent = hitRangeSliderBg
+    
+    -- Add corner to slider knob
+    local sliderKnobCorner = Instance.new("UICorner")
+    sliderKnobCorner.CornerRadius = UDim.new(1, 0)
+    sliderKnobCorner.Parent = hitRangeSliderKnob
+    
+    -- Hit range slider hitbox
+    local hitRangeSliderHitbox = Instance.new("TextButton")
+    hitRangeSliderHitbox.Name = "SliderHitbox"
+    hitRangeSliderHitbox.BackgroundTransparency = 1
+    hitRangeSliderHitbox.Position = UDim2.new(0, -10, 0, -10)
+    hitRangeSliderHitbox.Size = UDim2.new(1, 20, 1, 20)
+    hitRangeSliderHitbox.Font = Enum.Font.SourceSans
+    hitRangeSliderHitbox.Text = ""
+    hitRangeSliderHitbox.TextColor3 = Color3.fromRGB(0, 0, 0)
+    hitRangeSliderHitbox.TextSize = 14
+    hitRangeSliderHitbox.Parent = hitRangeSliderBg
+    
+    return {
+        ScreenGui = screenGui,
+        ToggleButton = toggleButton,
+        MainFrame = mainFrame,
+        CloseButton = closeButton,
+        ToggleHitbox = toggleHitbox,
+        ToggleIndicator = toggleIndicator,
+        StatusLabel = statusLabel,
+        HitRangeLabel = hitRangeLabel,
+        HitRangeSliderHitbox = hitRangeSliderHitbox,
+        HitRangeSliderFill = hitRangeSliderFill,
+        HitRangeSliderKnob = hitRangeSliderKnob,
+        TitleBar = titleBar
+    }
+end
+
+-- Function to update status indicator
+function updateStatusIndicator()
+    if not gui then return end
+    
+    if autoFarm then
+        -- Update status text
+        gui.StatusLabel.Text = "Status: ON"
+        gui.StatusLabel.TextColor3 = Color3.fromRGB(75, 255, 75)
+        
+        -- Update toggle indicator
+        local tween = tweenService:Create(
+            gui.ToggleIndicator, 
+            TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            {Position = UDim2.new(1, -25, 0.5, -10), BackgroundColor3 = Color3.fromRGB(75, 255, 75)}
         )
+        tween:Play()
+    else
+        -- Update status text
+        gui.StatusLabel.Text = "Status: OFF"
+        gui.StatusLabel.TextColor3 = Color3.fromRGB(255, 75, 75)
+        
+        -- Update toggle indicator
+        local tween = tweenService:Create(
+            gui.ToggleIndicator, 
+            TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            {Position = UDim2.new(0, 5, 0.5, -10), BackgroundColor3 = Color3.fromRGB(255, 75, 75)}
+        )
+        tween:Play()
     end
-end)
+end
 
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.Touch then
-        dragging = false -- Fixed: Set to false when touch ends
-        dragStart = nil
-        startPos = nil
+-- Function to update hit range
+local function updateHitRange(newRange)
+    HIT_RANGE = math.clamp(newRange, 1, 20)
+    
+    if gui then
+        gui.HitRangeLabel.Text = "Hit Range: " .. HIT_RANGE
+        gui.HitRangeSliderFill.Size = UDim2.new(HIT_RANGE/20, 0, 1, 0)
+        gui.HitRangeSliderKnob.Position = UDim2.new(HIT_RANGE/20, 0, 0.5, -10)
     end
-end)
+end
 
--- Initial Config Load (optional)
-pcall(function() -- Use pcall to prevent errors if config doesn't exist yet
-    MacLib:LoadConfig("config")
-end)
+-- Function to open/close GUI
+local function toggleGui()
+    if mainFrame then
+        mainFrame.Visible = not mainFrame.Visible
+    end
+end
+
+-- Function to make an object draggable
+local function makeDraggable(dragObject, targetObject)
+    local dragStart, startPos
+    
+    dragObject.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = targetObject.Position
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    
+    userInput.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+            local delta = input.Position - dragStart
+            targetObject.Position = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+end
+
+-- Initialize the GUI and setup events
+local function init()
+    enableNoFall()
+    gui = createGui()
+    
+    -- Make main window draggable
+    makeDraggable(gui.TitleBar, gui.MainFrame)
+    
+    -- Toggle button event
+    gui.ToggleButton.MouseButton1Click:Connect(toggleGui)
+    
+    -- Close button event
+    gui.CloseButton.MouseButton1Click:Connect(function()
+        gui.MainFrame.Visible = false
+    end)
+    
+    -- Toggle auto farm event
+    gui.ToggleHitbox.MouseButton1Click:Connect(function()
+        if autoFarm then
+            stopAutoFarm()
+        else
+            startAutoFarm()
+        end
+    end)
+    
+    -- Hit range slider logic
+    local sliderDrag = false
+    
+    gui.HitRangeSliderHitbox.MouseButton1Down:Connect(function()
+        sliderDrag = true
+    end)
+    
+    userInput.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            sliderDrag = false
+        end
+    end)
+    
+    userInput.InputChanged:Connect(function(input)
+        if sliderDrag and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+            local sliderBackground = gui.HitRangeSliderHitbox.Parent
+            local relativePos = userInput:GetMouseLocation() - sliderBackground.AbsolutePosition
+            local sliderPercent = math.clamp(relativePos.X / sliderBackground.AbsoluteSize.X, 0, 1)
+            local newRange = math.floor(sliderPercent * 20) + 1
+            updateHitRange(newRange)
+        end
+    end)
+    
+    -- Key shortcut to toggle GUI
+    userInput.InputBegan:Connect(function(input, gameProcessed)
+        if not gameProcessed and input.KeyCode == Enum.KeyCode.RightControl then
+            toggleGui()
+        elseif not gameProcessed and input.KeyCode == Enum.KeyCode.Zero then
+            stopAutoFarm()
+        end
+    end)
+    
+    updateStatusIndicator()
+end
+
+init()
