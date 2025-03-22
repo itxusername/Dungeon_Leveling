@@ -44,10 +44,10 @@ local ConfigSection = ConfigTab:Section({Side = "Left"})
 ConfigSection:Button({
     Name = "Save Config",
     Callback = function()
-        MacLib:SaveConfig("settings.txt")
+        MacLib:SaveConfig("config") -- Changed from "settings.txt" to "config"
         Window:Notify({
             Title = "Config",
-            Description = "Settings saved to settings.txt"
+            Description = "Settings saved"
         })
     end
 })
@@ -55,10 +55,10 @@ ConfigSection:Button({
 ConfigSection:Button({
     Name = "Load Config",
     Callback = function()
-        MacLib:LoadConfig("settings.txt")
+        MacLib:LoadConfig("config") -- Changed from "settings.txt" to "config"
         Window:Notify({
             Title = "Config",
-            Description = "Settings loaded from settings.txt"
+            Description = "Settings loaded"
         })
     end
 })
@@ -148,9 +148,9 @@ ToggleButton.Parent = ScreenGui
 local uiVisible = true
 ToggleButton.MouseButton1Click:Connect(function()
     uiVisible = not uiVisible
-    Window.Frame.Visible = uiVisible -- Assuming 'Frame' is the main UI container (may need adjustment)
+    Window.Frame.Visible = uiVisible -- Assuming 'Frame' is the main UI container
     ToggleButton.Text = uiVisible and "Toggle UI" or "Show UI"
 end)
 
 -- Initial Config Load (optional)
-MacLib:LoadConfig("settings.txt")
+MacLib:LoadConfig("config") -- Changed from "settings.txt" to "config"
