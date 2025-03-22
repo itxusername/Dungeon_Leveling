@@ -15,13 +15,28 @@ local Window = MacLib:Window({
 -- Set config folder
 MacLib:SetFolder("NightRBX_Configs")
 
--- Defer positioning until the frame is available
-task.defer(function()
-    if Window.Frame then
-        Window.Frame.Position = UDim2.new(0.5, -434, 0.5, -325) -- Center based on size (868/2, 650/2)
-        Window.Frame.AnchorPoint = Vector2.new(0.5, 0.5)
+-- Find the main UI frame dynamically
+local mainFrame
+task.spawn(function()
+    local maxAttempts = 10
+    local attempts = 0
+    while attempts < maxAttempts do
+        for _, obj in Window.Frame:GetDescendants() do
+            if obj:IsA("Frame") and obj.Size == UDim2.fromOffset(868, 650) then
+                mainFrame = obj
+                break
+            end
+        end
+        if mainFrame then break end
+        attempts += 1
+        task.wait(0.1)
+    end
+
+    if mainFrame then
+        mainFrame.Position = UDim2.new(0.5, -434, 0.5, -325) -- Center based on size
+        mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
     else
-        warn("Window.Frame not found; UI positioning may not work as expected.")
+        warn("Could not find main UI frame; positioning and dragging may not work.")
     end
 end)
 
@@ -155,7 +170,6 @@ ToggleButton.Size = UDim2.new(0, 50, 0, 50) -- Circular size
 ToggleButton.Position = UDim2.new(0.5, -25, 0, 10) -- Centered at top
 ToggleButton.AnchorPoint = Vector2.new(0.5, 0)
 ToggleButton.BackgroundTransparency = 1
-ToggleButton.Image = "" -- No image, relying on shape
 ToggleButton.Parent = ScreenGui
 
 -- Make it circular with UIStroke and UICorner
@@ -174,40 +188,40 @@ ToggleButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50) -- Gray fill
 local uiVisible = true
 ToggleButton.MouseButton1Click:Connect(function()
     uiVisible = not uiVisible
-    if Window.Frame then
-        Window.Frame.Visible = uiVisible
-        ToggleButton.BackgroundColor3 = uiVisible and Color3.fromRGB(50, 50, 50) or Color3.fromRGB(150, 150, 150) -- Color change for feedback
+    if mainFrame then
+        mainFrame.Visible = uiVisible
+        ToggleButton.BackgroundColor3 = uiVisible and Color3.fromRGB(50, 50, 50) or Color3.fromRGB(150, 150, 150)
     else
-        warn("Window.Frame not found; UI toggle may not work.")
+        warn("Main frame not found; UI toggle may not work.")
     end
 end)
 
 -- Ensure mobile dragging works
 local UserInputService = game:GetService("UserInputService")
-local dragging = false
+local dragging = true
 local dragStart: Vector2?
 local startPos: UDim2?
 
 UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
     if gameProcessed then return end
-    if input.UserInputType == Enum.UserInputType.Touch and input.Position and Window.Frame then
+    if input.UserInputType == Enum.UserInputType.Touch and input.Position and mainFrame then
         local touchPos = Vector2.new(input.Position.X, input.Position.Y)
-        local framePos = Window.Frame.AbsolutePosition
-        local frameSize = Window.Frame.AbsoluteSize
+        local framePos = mainFrame.AbsolutePosition
+        local frameSize = mainFrame.AbsoluteSize
         if touchPos.X >= framePos.X and touchPos.X <= framePos.X + frameSize.X and
            touchPos.Y >= framePos.Y and touchPos.Y <= framePos.Y + 50 then -- Top 50 studs
             dragging = true
             dragStart = touchPos
-            startPos = Window.Frame.Position
+            startPos = mainFrame.Position
         end
     end
 end)
 
 UserInputService.InputChanged:Connect(function(input: InputObject)
-    if dragging and input.UserInputType == Enum.UserInputType.Touch and dragStart and startPos and Window.Frame then
+    if dragging and input.UserInputType == Enum.UserInputType.Touch and dragStart and startPos and mainFrame then
         local touchPos = Vector2.new(input.Position.X, input.Position.Y)
         local delta = touchPos - dragStart
-        Window.Frame.Position = UDim2.new(
+        mainFrame.Position = UDim2.new(
             startPos.X.Scale,
             startPos.X.Offset + delta.X,
             startPos.Y.Scale,
@@ -218,7 +232,7 @@ end)
 
 UserInputService.InputEnded:Connect(function(input: InputObject)
     if input.UserInputType == Enum.UserInputType.Touch then
-        dragging = false
+        dragging = true
         dragStart = nil
         startPos = nil
     end
