@@ -5,7 +5,7 @@ local Window = MacLib:Window({
     Title = "Night RBX",
     Subtitle = "BETA | V0.1",
     Size = UDim2.fromOffset(868, 650),
-    DragStyle = 1,
+    DragStyle = 3, -- Changed to 3 for full top-bar dragging, better for mobile
     DisabledWindowControls = {},
     ShowUserInfo = true,
     Keybind = Enum.KeyCode.RightControl,
@@ -14,6 +14,10 @@ local Window = MacLib:Window({
 
 -- Set config folder
 MacLib:SetFolder("NightRBX_Configs")
+
+-- Make the window movable on mobile
+Window.Frame.Position = UDim2.new(0.5, -434, 0.5, -325) -- Center the UI initially
+Window.Frame.AnchorPoint = Vector2.new(0.5, 0.5) -- Anchor to center for better mobile positioning
 
 -- Create TabGroup
 local TabGroup = Window:TabGroup()
@@ -44,7 +48,7 @@ local ConfigSection = ConfigTab:Section({Side = "Left"})
 ConfigSection:Button({
     Name = "Save Config",
     Callback = function()
-        MacLib:SaveConfig("config") -- Changed from "settings.txt" to "config"
+        MacLib:SaveConfig("config")
         Window:Notify({
             Title = "Config",
             Description = "Settings saved"
@@ -55,7 +59,7 @@ ConfigSection:Button({
 ConfigSection:Button({
     Name = "Load Config",
     Callback = function()
-        MacLib:LoadConfig("config") -- Changed from "settings.txt" to "config"
+        MacLib:LoadConfig("config")
         Window:Notify({
             Title = "Config",
             Description = "Settings loaded"
@@ -134,23 +138,24 @@ CombatSections.RightBottom:Button({
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
 ScreenGui.Name = "UIToggleGui"
+ScreenGui.ResetOnSpawn = false -- Prevent resetting on respawn
 
-local ToggleButton = Instance.new("TextButton")
-ToggleButton.Size = UDim2.new(0, 100, 0, 50)
-ToggleButton.Position = UDim2.new(0.5, -50, 0, 10) -- Centered at top
+local ToggleButton = Instance.new("ImageButton") -- Changed to ImageButton for circle
+ToggleButton.Size = UDim2.new(0, 50, 0, 50) -- Circular size
+ToggleButton.Position = UDim2.new(0.5, -25, 0, 10) -- Centered at top
 ToggleButton.AnchorPoint = Vector2.new(0.5, 0)
-ToggleButton.Text = "Toggle UI"
-ToggleButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleButton.BackgroundTransparency = 1 -- No background
+ToggleButton.Image = "rbxassetid://83971645462159" -- Your provided image ID
 ToggleButton.Parent = ScreenGui
 
 -- Toggle UI visibility
 local uiVisible = true
 ToggleButton.MouseButton1Click:Connect(function()
     uiVisible = not uiVisible
-    Window.Frame.Visible = uiVisible -- Assuming 'Frame' is the main UI container
-    ToggleButton.Text = uiVisible and "Toggle UI" or "Show UI"
+    Window.Frame.Visible = uiVisible
+    -- Optional: Change image transparency to indicate state
+    ToggleButton.ImageTransparency = uiVisible and 0 or 0.5
 end)
 
 -- Initial Config Load (optional)
-MacLib:LoadConfig("config") -- Changed from "settings.txt" to "config"
+MacLib:LoadConfig("config")
