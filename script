@@ -5,7 +5,7 @@ local Window = MacLib:Window({
     Title = "Night RBX",
     Subtitle = "BETA | V0.1",
     Size = UDim2.fromOffset(868, 650),
-    DragStyle = 3, -- Changed to 3 for full top-bar dragging, better for mobile
+    DragStyle = 3, -- Full top-bar dragging for mobile compatibility
     DisabledWindowControls = {},
     ShowUserInfo = true,
     Keybind = Enum.KeyCode.RightControl,
@@ -15,9 +15,9 @@ local Window = MacLib:Window({
 -- Set config folder
 MacLib:SetFolder("NightRBX_Configs")
 
--- Make the window movable on mobile
-Window.Frame.Position = UDim2.new(0.5, -434, 0.5, -325) -- Center the UI initially
-Window.Frame.AnchorPoint = Vector2.new(0.5, 0.5) -- Anchor to center for better mobile positioning
+-- Ensure the window is initially centered and draggable
+Window.Frame.Position = UDim2.new(0.5, -434, 0.5, -325) -- Center based on size (868/2, 650/2)
+Window.Frame.AnchorPoint = Vector2.new(0.5, 0.5)
 
 -- Create TabGroup
 local TabGroup = Window:TabGroup()
@@ -107,7 +107,7 @@ CombatSections.LeftBottom:Slider({
     Minimum = 5,
     Maximum = 20,
     DisplayMethod = "Percent",
-    Callback = function(Value)
+    Callback = function(Value: number)
         print("Attack range set to: " .. Value)
     end
 }, "AttackRange")
@@ -115,7 +115,7 @@ CombatSections.LeftBottom:Slider({
 CombatSections.RightTop:Toggle({
     Name = "Auto Attack",
     Default = false,
-    Callback = function(value)
+    Callback = function(value: boolean)
         Window:Notify({
             Title = "Auto Attack",
             Description = value and "Enabled" or "Disabled"
@@ -135,17 +135,21 @@ CombatSections.RightBottom:Button({
 })
 
 -- Create Toggle Button for Mobile Players
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
-ScreenGui.Name = "UIToggleGui"
-ScreenGui.ResetOnSpawn = false -- Prevent resetting on respawn
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
-local ToggleButton = Instance.new("ImageButton") -- Changed to ImageButton for circle
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "UIToggleGui"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = PlayerGui
+
+local ToggleButton = Instance.new("ImageButton")
 ToggleButton.Size = UDim2.new(0, 50, 0, 50) -- Circular size
 ToggleButton.Position = UDim2.new(0.5, -25, 0, 10) -- Centered at top
 ToggleButton.AnchorPoint = Vector2.new(0.5, 0)
-ToggleButton.BackgroundTransparency = 1 -- No background
-ToggleButton.Image = "rbxassetid://83971645462159" -- Your provided image ID
+ToggleButton.BackgroundTransparency = 1
+ToggleButton.Image = "rbxassetid://83971645462159" -- Your image ID
 ToggleButton.Parent = ScreenGui
 
 -- Toggle UI visibility
@@ -153,8 +157,49 @@ local uiVisible = true
 ToggleButton.MouseButton1Click:Connect(function()
     uiVisible = not uiVisible
     Window.Frame.Visible = uiVisible
-    -- Optional: Change image transparency to indicate state
-    ToggleButton.ImageTransparency = uiVisible and 0 or 0.5
+    ToggleButton.ImageTransparency = uiVisible and 0 or 0.5 -- Visual feedback
+end)
+
+-- Ensure mobile dragging works
+local UserInputService = game:GetService("UserInputService")
+local dragging = false
+local dragStart: Vector2?
+local startPos: UDim2?
+
+UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
+    if gameProcessed then return end
+    if input.UserInputType == Enum.UserInputType.Touch and input.Position then
+        local touchPos = Vector2.new(input.Position.X, input.Position.Y)
+        local framePos = Window.Frame.AbsolutePosition
+        local frameSize = Window.Frame.AbsoluteSize
+        if touchPos.X >= framePos.X and touchPos.X <= framePos.X + frameSize.X and
+           touchPos.Y >= framePos.Y and touchPos.Y <= framePos.Y + 50 then -- Top 50 studs for dragging
+            dragging = true
+            dragStart = touchPos
+            startPos = Window.Frame.Position
+        end
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input: InputObject)
+    if dragging and input.UserInputType == Enum.UserInputType.Touch and dragStart and startPos then
+        local touchPos = Vector2.new(input.Position.X, input.Position.Y)
+        local delta = touchPos - dragStart
+        Window.Frame.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input: InputObject)
+    if input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+        dragStart = nil
+        startPos = nil
+    end
 end)
 
 -- Initial Config Load (optional)
