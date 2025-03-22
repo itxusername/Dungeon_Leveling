@@ -5,7 +5,7 @@ local Window = MacLib:Window({
     Title = "Night RBX",
     Subtitle = "BETA | V0.1",
     Size = UDim2.fromOffset(868, 650),
-    DragStyle = 3, -- Full top-bar dragging for mobile compatibility
+    DragStyle = 3, -- Full top-bar dragging for mobile
     DisabledWindowControls = {},
     ShowUserInfo = true,
     Keybind = Enum.KeyCode.RightControl,
@@ -15,9 +15,15 @@ local Window = MacLib:Window({
 -- Set config folder
 MacLib:SetFolder("NightRBX_Configs")
 
--- Ensure the window is initially centered and draggable
-Window.Frame.Position = UDim2.new(0.5, -434, 0.5, -325) -- Center based on size (868/2, 650/2)
-Window.Frame.AnchorPoint = Vector2.new(0.5, 0.5)
+-- Defer positioning until the frame is available
+task.defer(function()
+    if Window.Frame then
+        Window.Frame.Position = UDim2.new(0.5, -434, 0.5, -325) -- Center based on size (868/2, 650/2)
+        Window.Frame.AnchorPoint = Vector2.new(0.5, 0.5)
+    else
+        warn("Window.Frame not found; UI positioning may not work as expected.")
+    end
+end)
 
 -- Create TabGroup
 local TabGroup = Window:TabGroup()
@@ -149,15 +155,31 @@ ToggleButton.Size = UDim2.new(0, 50, 0, 50) -- Circular size
 ToggleButton.Position = UDim2.new(0.5, -25, 0, 10) -- Centered at top
 ToggleButton.AnchorPoint = Vector2.new(0.5, 0)
 ToggleButton.BackgroundTransparency = 1
-ToggleButton.Image = "rbxassetid://83971645462159" -- Your image ID
+ToggleButton.Image = "" -- No image, relying on shape
 ToggleButton.Parent = ScreenGui
+
+-- Make it circular with UIStroke and UICorner
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(1, 0) -- Full circle
+UICorner.Parent = ToggleButton
+
+local UIStroke = Instance.new("UIStroke")
+UIStroke.Thickness = 2
+UIStroke.Color = Color3.fromRGB(255, 255, 255)
+UIStroke.Parent = ToggleButton
+
+ToggleButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50) -- Gray fill
 
 -- Toggle UI visibility
 local uiVisible = true
 ToggleButton.MouseButton1Click:Connect(function()
     uiVisible = not uiVisible
-    Window.Frame.Visible = uiVisible
-    ToggleButton.ImageTransparency = uiVisible and 0 or 0.5 -- Visual feedback
+    if Window.Frame then
+        Window.Frame.Visible = uiVisible
+        ToggleButton.BackgroundColor3 = uiVisible and Color3.fromRGB(50, 50, 50) or Color3.fromRGB(150, 150, 150) -- Color change for feedback
+    else
+        warn("Window.Frame not found; UI toggle may not work.")
+    end
 end)
 
 -- Ensure mobile dragging works
@@ -168,12 +190,12 @@ local startPos: UDim2?
 
 UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
     if gameProcessed then return end
-    if input.UserInputType == Enum.UserInputType.Touch and input.Position then
+    if input.UserInputType == Enum.UserInputType.Touch and input.Position and Window.Frame then
         local touchPos = Vector2.new(input.Position.X, input.Position.Y)
         local framePos = Window.Frame.AbsolutePosition
         local frameSize = Window.Frame.AbsoluteSize
         if touchPos.X >= framePos.X and touchPos.X <= framePos.X + frameSize.X and
-           touchPos.Y >= framePos.Y and touchPos.Y <= framePos.Y + 50 then -- Top 50 studs for dragging
+           touchPos.Y >= framePos.Y and touchPos.Y <= framePos.Y + 50 then -- Top 50 studs
             dragging = true
             dragStart = touchPos
             startPos = Window.Frame.Position
@@ -182,7 +204,7 @@ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: 
 end)
 
 UserInputService.InputChanged:Connect(function(input: InputObject)
-    if dragging and input.UserInputType == Enum.UserInputType.Touch and dragStart and startPos then
+    if dragging and input.UserInputType == Enum.UserInputType.Touch and dragStart and startPos and Window.Frame then
         local touchPos = Vector2.new(input.Position.X, input.Position.Y)
         local delta = touchPos - dragStart
         Window.Frame.Position = UDim2.new(
