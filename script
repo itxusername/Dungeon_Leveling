@@ -21,7 +21,7 @@ task.spawn(function()
     local maxAttempts = 10
     local attempts = 0
     while attempts < maxAttempts do
-        for _, obj in Window.Frame:GetDescendants() do
+        for _, obj in pairs(Window.Frame:GetDescendants()) do
             if obj:IsA("Frame") and obj.Size == UDim2.fromOffset(868, 650) then
                 mainFrame = obj
                 break
@@ -128,7 +128,7 @@ CombatSections.LeftBottom:Slider({
     Minimum = 5,
     Maximum = 20,
     DisplayMethod = "Percent",
-    Callback = function(Value: number)
+    Callback = function(Value)
         print("Attack range set to: " .. Value)
     end
 }, "AttackRange")
@@ -136,7 +136,7 @@ CombatSections.LeftBottom:Slider({
 CombatSections.RightTop:Toggle({
     Name = "Auto Attack",
     Default = false,
-    Callback = function(value: boolean)
+    Callback = function(value)
         Window:Notify({
             Title = "Auto Attack",
             Description = value and "Enabled" or "Disabled"
@@ -160,6 +160,11 @@ local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
+-- Check if ScreenGui already exists and remove it to prevent duplicates
+if PlayerGui:FindFirstChild("UIToggleGui") then
+    PlayerGui:FindFirstChild("UIToggleGui"):Destroy()
+end
+
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "UIToggleGui"
 ScreenGui.ResetOnSpawn = false
@@ -169,7 +174,7 @@ local ToggleButton = Instance.new("ImageButton")
 ToggleButton.Size = UDim2.new(0, 50, 0, 50) -- Circular size
 ToggleButton.Position = UDim2.new(0.5, -25, 0, 10) -- Centered at top
 ToggleButton.AnchorPoint = Vector2.new(0.5, 0)
-ToggleButton.BackgroundTransparency = 1
+ToggleButton.BackgroundTransparency = 0.2
 ToggleButton.Parent = ScreenGui
 
 -- Make it circular with UIStroke and UICorner
@@ -198,11 +203,11 @@ end)
 
 -- Ensure mobile dragging works
 local UserInputService = game:GetService("UserInputService")
-local dragging = true
-local dragStart: Vector2?
-local startPos: UDim2?
+local dragging = false -- Fixed: Initialize as false
+local dragStart
+local startPos
 
-UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if input.UserInputType == Enum.UserInputType.Touch and input.Position and mainFrame then
         local touchPos = Vector2.new(input.Position.X, input.Position.Y)
@@ -217,7 +222,7 @@ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: 
     end
 end)
 
-UserInputService.InputChanged:Connect(function(input: InputObject)
+UserInputService.InputChanged:Connect(function(input)
     if dragging and input.UserInputType == Enum.UserInputType.Touch and dragStart and startPos and mainFrame then
         local touchPos = Vector2.new(input.Position.X, input.Position.Y)
         local delta = touchPos - dragStart
@@ -230,13 +235,15 @@ UserInputService.InputChanged:Connect(function(input: InputObject)
     end
 end)
 
-UserInputService.InputEnded:Connect(function(input: InputObject)
+UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
+        dragging = false -- Fixed: Set to false when touch ends
         dragStart = nil
         startPos = nil
     end
 end)
 
 -- Initial Config Load (optional)
-MacLib:LoadConfig("config")
+pcall(function() -- Use pcall to prevent errors if config doesn't exist yet
+    MacLib:LoadConfig("config")
+end)
