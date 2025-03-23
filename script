@@ -8,7 +8,7 @@ local autoFarm = true
 local HIT_RANGE = 10
 local orbitRadius = 10
 local orbitAngle = 0
-local heightOffset = -0.5  -- Height offset now decreased by 0.5 studs
+local heightOffset = 2.5
 
 local function isArcher(mob)
     return mob.Name:lower():find("archer") ~= nil 
@@ -57,7 +57,6 @@ local function attack()
     while autoFarm do
         local mob = getClosestMob()
         if mob and mob:FindFirstChild("HumanoidRootPart") then
-            -- Set anchored to false before teleporting
             humanoidRootPart.Anchored = false
             
             orbitAngle = orbitAngle + 10
@@ -68,21 +67,20 @@ local function attack()
             local z = math.sin(angle) * orbitRadius
             
             local mobPosition = mob.HumanoidRootPart.Position
-            -- Lower Y position by 0.5
+            -- Add height offset to avoid traps
             local targetPosition = mobPosition + Vector3.new(x, heightOffset, z)
             
-            -- Directly teleport to position instead of tweening
+            -- Look at the mob's upper body to ensure attacks hit
             local lookAtPosition = mobPosition + Vector3.new(0, 1, 0)
             humanoidRootPart.CFrame = CFrame.new(targetPosition, lookAtPosition)
-            
-            -- Set anchored to true after teleporting
-            humanoidRootPart.Anchored = true
             
             game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Combat")
                 :FireServer("Attack")
             useSkill("FlurryOfBlows")
             useSkill("BloodyCut")
             useSkill("Invisibility")
+            
+            humanoidRootPart.Anchored = true
             
             task.wait(0.1)
         else
@@ -98,7 +96,6 @@ local function startOrbiting()
     connection = runService.Heartbeat:Connect(function()
         local mob = getClosestMob()
         if mob and mob:FindFirstChild("HumanoidRootPart") and autoFarm then
-            -- Set anchored to false before teleporting
             humanoidRootPart.Anchored = false
             
             orbitAngle = orbitAngle + 2.5
@@ -109,15 +106,12 @@ local function startOrbiting()
             local z = math.sin(angle) * orbitRadius
             
             local mobPosition = mob.HumanoidRootPart.Position
-            -- Lower Y position by 0.5
+            -- Add height offset to avoid traps
             local targetPosition = mobPosition + Vector3.new(x, heightOffset, z)
             
-            -- Directly teleport to position instead of tweening
+            -- Look at the mob's upper body to ensure attacks hit
             local lookAtPosition = mobPosition + Vector3.new(0, 1, 0)
             humanoidRootPart.CFrame = CFrame.new(targetPosition, lookAtPosition)
-            
-            -- Set anchored to true after teleporting
-            humanoidRootPart.Anchored = true
         end
     end)
 end
