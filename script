@@ -2,17 +2,12 @@ local player = game.Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 local runService = game:GetService("RunService")
-local userInput = game:GetService("UserInputService")
-local tweenService = game:GetService("TweenService")
+local replicatedStorage = game:GetService("ReplicatedStorage")
 local autoFarm = true
-local HIT_RANGE = 10
 local orbitRadius = 10
 local orbitAngle = 0
 local heightOffset = 2.5
-
-local function isArcher(mob)
-    return mob.Name:lower():find("archer") ~= nil 
-end
+local teleportInterval = 0.5 -- Teleport every 0.5 seconds
 
 local function getClosestMob()
     local closestMob = nil
@@ -35,41 +30,25 @@ local function getClosestMob()
     return closestMob
 end
 
-local function isInRange(mob, range)
-    if not mob then return false end
-    local mobRootPart = mob:FindFirstChild("HumanoidRootPart")
-    if not mobRootPart or not humanoidRootPart then return false end
-    return (mobRootPart.Position - humanoidRootPart.Position).Magnitude <= range
-end
-
 local function equipWeapon()
-    local weaponsEvent = game:GetService("ReplicatedStorage"):FindFirstChild("Events")
-    
-    if weaponsEvent and weaponsEvent:FindFirstChild("WeaponsEvent") then
+    local events = replicatedStorage:FindFirstChild("Events")
+    if events and events:FindFirstChild("WeaponsEvent") then
         local args = {
             [1] = "Equip/UnEquip"
         }
-        weaponsEvent:FindFirstChild("WeaponsEvent"):FireServer(unpack(args))
+        events:FindFirstChild("WeaponsEvent"):FireServer(unpack(args))
     else
         warn("WeaponsEvent not found")
     end
 end
 
--- Make sure the events exist before trying to use them
-local replicatedStorage = game:GetService("ReplicatedStorage")
-local events = replicatedStorage:FindFirstChild("Events")
-
-if events then
-    -- Try to equip weapon
-    pcall(function()
-        equipWeapon()
-    end)
-else
-    warn("Events folder not found in ReplicatedStorage")
-end
+-- Try to equip weapon
+pcall(function()
+    equipWeapon()
+end)
 
 local function useSkill(skillName)
-    -- Make sure the Skill event exists
+    local events = replicatedStorage:FindFirstChild("Events")
     local skillEvent = events and events:FindFirstChild("Skill")
     if not skillEvent then
         warn("Skill event not found")
@@ -87,27 +66,21 @@ local function useSkill(skillName)
     end)
 end
 
-local function attack()
-    local combatEvent = events and events:FindFirstChild("Combat")
-    if not combatEvent then
-        warn("Combat event not found")
-        return
+local function teleportAndAttack()
+    -- Ensure character is anchored from the start
+    if humanoidRootPart then
+        humanoidRootPart.Anchored = true
     end
     
     while autoFarm do
+        local events = replicatedStorage:FindFirstChild("Events")
+        local combatEvent = events and events:FindFirstChild("Combat")
+        
         local mob = getClosestMob()
         
-        if mob and mob:FindFirstChild("HumanoidRootPart") then
-            -- Check if the character still exists
-            if not character or not character:FindFirstChild("HumanoidRootPart") then
-                warn("Character or HumanoidRootPart no longer exists")
-                stopAutoFarm()
-                return
-            end
-            
-            humanoidRootPart.Anchored = false
-            
-            orbitAngle = orbitAngle + 10
+        if mob and mob:FindFirstChild("HumanoidRootPart") and humanoidRootPart then
+            -- Calculate new position around the mob
+            orbitAngle = orbitAngle + 45 -- Larger angle increments for distinct positions
             if orbitAngle >= 360 then orbitAngle = 0 end
             
             local angle = math.rad(orbitAngle)
@@ -118,59 +91,28 @@ local function attack()
             -- Add height offset to avoid traps
             local targetPosition = mobPosition + Vector3.new(x, heightOffset, z)
             
-            -- Look at the mob's upper body to ensure attacks hit
+            -- Teleport to the new position and look at the mob
             local lookAtPosition = mobPosition + Vector3.new(0, 1, 0)
             humanoidRootPart.CFrame = CFrame.new(targetPosition, lookAtPosition)
             
-            pcall(function()
-                combatEvent:FireServer("Attack")
-            end)
+            -- Ensure we're still anchored after teleport
+            humanoidRootPart.Anchored = true
+            
+            -- Attack and use skills
+            if combatEvent then
+                pcall(function()
+                    combatEvent:FireServer("Attack")
+                end)
+            end
             
             useSkill("FlurryOfBlows")
             useSkill("BloodyCut")
             useSkill("Invisibility")
-            
-            humanoidRootPart.Anchored = true
-            
-            task.wait(0.1)
-        else
-            task.wait(0.5)
-        end
-    end
-end
-
-local connection
-local function startOrbiting()
-    if connection then connection:Disconnect() end
-    
-    connection = runService.Heartbeat:Connect(function()
-        -- Check if character still exists
-        if not character or not character:FindFirstChild("HumanoidRootPart") then
-            warn("Character or HumanoidRootPart no longer exists")
-            if connection then connection:Disconnect() end
-            return
         end
         
-        local mob = getClosestMob()
-        if mob and mob:FindFirstChild("HumanoidRootPart") and autoFarm then
-            humanoidRootPart.Anchored = false
-            
-            orbitAngle = orbitAngle + 2.5
-            if orbitAngle >= 360 then orbitAngle = 0 end
-            
-            local angle = math.rad(orbitAngle)
-            local x = math.cos(angle) * orbitRadius
-            local z = math.sin(angle) * orbitRadius
-            
-            local mobPosition = mob.HumanoidRootPart.Position
-            -- Add height offset to avoid traps
-            local targetPosition = mobPosition + Vector3.new(x, heightOffset, z)
-            
-            -- Look at the mob's upper body to ensure attacks hit
-            local lookAtPosition = mobPosition + Vector3.new(0, 1, 0)
-            humanoidRootPart.CFrame = CFrame.new(targetPosition, lookAtPosition)
-        end
-    end)
+        -- Wait for the specified teleport interval
+        task.wait(teleportInterval)
+    end
 end
 
 local function stopAutoFarm()
@@ -178,29 +120,41 @@ local function stopAutoFarm()
     if humanoidRootPart then
         humanoidRootPart.Anchored = false
     end
-    if connection then connection:Disconnect() end
 end
 
 local function enableNoFall()
     runService.Stepped:Connect(function()
         if autoFarm and character and character:FindFirstChild("HumanoidRootPart") then
+            -- Keep velocity at zero and make sure we stay anchored
             character.HumanoidRootPart.Velocity = Vector3.new(0, 0, 0)
+            character.HumanoidRootPart.Anchored = true
         end
     end)
 end
 
--- Define stopAutoFarm before it's called
+-- Make stopAutoFarm globally accessible
 _G.stopAutoFarm = stopAutoFarm
 
--- Add error handling to main functions
+-- Set character to be anchored from the start
+if humanoidRootPart then
+    humanoidRootPart.Anchored = true
+end
+
+-- Enable no fall damage protection
 pcall(function()
     enableNoFall()
 end)
 
+-- Start the teleport and attack function
 pcall(function()
-    startOrbiting()
+    teleportAndAttack()
 end)
 
-pcall(function()
-    attack()
+-- Create a safety backup to ensure anchoring if the character respawns
+player.CharacterAdded:Connect(function(newCharacter)
+    character = newCharacter
+    humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+    if autoFarm then
+        humanoidRootPart.Anchored = true
+    end
 end)
