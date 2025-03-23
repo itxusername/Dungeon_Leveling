@@ -6,9 +6,7 @@ local userInput = game:GetService("UserInputService")
 local tweenService = game:GetService("TweenService")
 local autoFarm = true
 local HIT_RANGE = 10
-local orbitRadius = 10
-local orbitAngle = 0
-local heightOffset = 2.5  -- Height offset now decreased by 0.5 studs
+local heightOffset = -2.5  -- Negative height offset to position under the mob
 
 local function isArcher(mob)
     return mob.Name:lower():find("archer") ~= nil 
@@ -53,31 +51,51 @@ local function useSkill(skillName)
     game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Skill"):FireServer(unpack(args))
 end
 
+local function tweenToMob(mob)
+    if not mob or not mob:FindFirstChild("HumanoidRootPart") or not humanoidRootPart then return end
+    
+    -- Set anchored to false before tweening
+    humanoidRootPart.Anchored = false
+    
+    local mobPosition = mob.HumanoidRootPart.Position
+    local targetPosition = mobPosition + Vector3.new(0, heightOffset, 0)  -- Position directly under the mob
+    
+    -- Create tween info
+    local tweenInfo = TweenInfo.new(
+        0.2,  -- Time to complete tween
+        Enum.EasingStyle.Quad,
+        Enum.EasingDirection.Out
+    )
+    
+    -- Create the tween
+    local tween = tweenService:Create(
+        humanoidRootPart, 
+        tweenInfo, 
+        {CFrame = CFrame.new(targetPosition, Vector3.new(mobPosition.X, targetPosition.Y, mobPosition.Z))}  -- Face the mob
+    )
+    
+    -- Start the tween
+    tween:Play()
+    
+    -- Wait for tween to complete
+    tween.Completed:Wait()
+    
+    -- Set anchored to true after tweening
+    humanoidRootPart.Anchored = true
+    
+    -- Ensure we're looking at the mob after tweening
+    local lookAtPosition = mobPosition
+    humanoidRootPart.CFrame = CFrame.lookAt(humanoidRootPart.Position, lookAtPosition)
+end
+
 local function attack()
     while autoFarm do
         local mob = getClosestMob()
         if mob and mob:FindFirstChild("HumanoidRootPart") then
-            -- Set anchored to false before teleporting
-            humanoidRootPart.Anchored = false
+            -- Tween to position under the mob
+            tweenToMob(mob)
             
-            orbitAngle = orbitAngle + 10
-            if orbitAngle >= 360 then orbitAngle = 0 end
-            
-            local angle = math.rad(orbitAngle)
-            local x = math.cos(angle) * orbitRadius
-            local z = math.sin(angle) * orbitRadius
-            
-            local mobPosition = mob.HumanoidRootPart.Position
-            -- Lower Y position by 0.5
-            local targetPosition = mobPosition + Vector3.new(x, heightOffset, z)
-            
-            -- Directly teleport to position instead of tweening
-            local lookAtPosition = mobPosition + Vector3.new(0, 1, 0)
-            humanoidRootPart.CFrame = CFrame.new(targetPosition, lookAtPosition)
-            
-            -- Set anchored to true after teleporting
-            humanoidRootPart.Anchored = true
-            
+            -- Perform attacks
             game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Combat")
                 :FireServer("Attack")
             useSkill("FlurryOfBlows")
@@ -91,41 +109,9 @@ local function attack()
     end
 end
 
-local connection
-local function startOrbiting()
-    if connection then connection:Disconnect() end
-    
-    connection = runService.Heartbeat:Connect(function()
-        local mob = getClosestMob()
-        if mob and mob:FindFirstChild("HumanoidRootPart") and autoFarm then
-            -- Set anchored to false before teleporting
-            humanoidRootPart.Anchored = false
-            
-            orbitAngle = orbitAngle + 2.5
-            if orbitAngle >= 360 then orbitAngle = 0 end
-            
-            local angle = math.rad(orbitAngle)
-            local x = math.cos(angle) * orbitRadius
-            local z = math.sin(angle) * orbitRadius
-            
-            local mobPosition = mob.HumanoidRootPart.Position
-            -- Lower Y position by 0.5
-            local targetPosition = mobPosition + Vector3.new(x, heightOffset, z)
-            
-            -- Directly teleport to position instead of tweening
-            local lookAtPosition = mobPosition + Vector3.new(0, 1, 0)
-            humanoidRootPart.CFrame = CFrame.new(targetPosition, lookAtPosition)
-            
-            -- Set anchored to true after teleporting
-            humanoidRootPart.Anchored = true
-        end
-    end)
-end
-
 local function stopAutoFarm()
     autoFarm = false
     humanoidRootPart.Anchored = false
-    if connection then connection:Disconnect() end
 end
 
 local function enableNoFall()
@@ -137,5 +123,4 @@ local function enableNoFall()
 end
 
 enableNoFall()
-startOrbiting()
 attack()
