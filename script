@@ -1,750 +1,129 @@
--- Initialize variables at the top
 local player = game.Players.LocalPlayer
-local gui = nil
-local mainFrame = nil
-local closeButton = nil
-local coinStayDuration = 5
-local saveFilePath = "settings.txt"
-local enemyRange = 10 -- Default enemy range
-local teleportDistance = 5 -- Default distance behind enemy
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+local runService = game:GetService("RunService")
+local userInput = game:GetService("UserInputService")
+local tweenService = game:GetService("TweenService")
+local autoFarm = true
+local HIT_RANGE = 10
+local orbitRadius = 10
+local orbitAngle = 0
+local heightOffset = 2.5  -- Height offset set to 2.5 studs
 
--- Forward declare functions that are used before their definitions
-local createGui
-local makeDraggable
-local loadSettings
-local saveSettings
-
--- Function to safely get services and objects
-local function safeGet(parent, path)
-    local current = parent
-    for _, name in ipairs(path) do
-        current = current and current:FindFirstChild(name)
-        if not current then return nil end
-    end
-    return current
+local function isArcher(mob)
+    return mob.Name:lower():find("archer") ~= nil 
 end
 
--- Safely get remote events
-local dataRemoteEvent = safeGet(game:GetService("ReplicatedStorage"), {"dataRemoteEvent"})
-local changeStartValueRemote = safeGet(game:GetService("ReplicatedStorage"), {"remotes", "changeStartValue"})
+local function getClosestMob()
+    local closestMob = nil
+    local closestDistance = math.huge
+    for _, mob in ipairs(workspace.Characters:GetChildren()) do
+        if mob:IsA("Model") and mob ~= character and mob:FindFirstChild("HumanoidRootPart") then
+            local dist = (mob.HumanoidRootPart.Position - humanoidRootPart.Position).Magnitude
+            if dist < closestDistance then
+                closestDistance = dist
+                closestMob = mob
+            end
+        end
+    end
+    return closestMob
+end
 
--- Safely get GUI elements
-local retryVote = safeGet(player.PlayerGui, {"RetryVote"})
-local revivePrompt = safeGet(player.PlayerGui, {"RevivePrompt"})
-local startButton = safeGet(player.PlayerGui, {"HUD", "Mobile", "StartButton"})
+local function isInRange(mob, range)
+    local mobRootPart = mob:FindFirstChild("HumanoidRootPart")
+    if not mobRootPart or not humanoidRootPart then return false end
+    return (mobRootPart.Position - humanoidRootPart.Position).Magnitude <= range
+end
 
-local voteArgs = {
-    [1] = {
-        [1] = {
-            ["\3"] = "vote",
-            ["vote"] = true
-        },
-        [2] = "."
+local function equipWeapon()
+    local args = {
+        [1] = "Equip/UnEquip"
     }
+    game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("WeaponsEvent"):FireServer(unpack(args))
+end
+
+equipWeapon()
+
+local function useSkill(skillName)
+    local args = {
+        [1] = { ["Skill"] = skillName, ["Function"] = "Activate" },
+        [2] = humanoidRootPart.Position,
+        [3] = true
+    }
+    game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Skill"):FireServer(unpack(args))
+end
+
+local function attack()
+    humanoidRootPart.Anchored = true  -- Always anchored
+    
+    while autoFarm do
+        local mob = getClosestMob()
+        if mob and mob:FindFirstChild("HumanoidRootPart") then
+            orbitAngle = orbitAngle + 10
+            if orbitAngle >= 360 then orbitAngle = 0 end
+            
+            local angle = math.rad(orbitAngle)
+            local x = math.cos(angle) * orbitRadius
+            local z = math.sin(angle) * orbitRadius
+            
+            local mobPosition = mob.HumanoidRootPart.Position
+            local targetPosition = mobPosition + Vector3.new(x, heightOffset, z)
+            
+            local lookAtPosition = mobPosition + Vector3.new(0, 1, 0)
+            humanoidRootPart.CFrame = CFrame.new(targetPosition, lookAtPosition)
+            
+            game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Combat")
+                :FireServer("Attack")
+            useSkill("FlurryOfBlows")
+            useSkill("BloodyCut")
+            useSkill("Invisibility")
+            
+            task.wait(0.1)
+        else
+            task.wait(0.5)
+        end
+    end
+end
+
+local connection
+local function startOrbiting()
+    if connection then connection:Disconnect() end
+    
+    humanoidRootPart.Anchored = true  -- Always anchored
+    
+    connection = runService.Heartbeat:Connect(function()
+        local mob = getClosestMob()
+        if mob and mob:FindFirstChild("HumanoidRootPart") and autoFarm then
+            orbitAngle = orbitAngle + 2.5
+            if orbitAngle >= 360 then orbitAngle = 0 end
+            
+            local angle = math.rad(orbitAngle)
+            local x = math.cos(angle) * orbitRadius
+            local z = math.sin(angle) * orbitRadius
+            
+            local mobPosition = mob.HumanoidRootPart.Position
+            local targetPosition = mobPosition + Vector3.new(x, heightOffset, z)
+            
+            local lookAtPosition = mobPosition + Vector3.new(0, 1, 0)
+            humanoidRootPart.CFrame = CFrame.new(targetPosition, lookAtPosition)
+        end
+    end)
+end
+
+local function stopAutoFarm()
+    autoFarm = false
+    if connection then connection:Disconnect() end
+    -- Not unanchoring to keep character always anchored
 }
 
-local reviveArgs = {
-    [1] = {
-        [1] = {
-            ["\3"] = "closeRevive"
-        },
-        [2] = "\13"
-    }
-}
-
--- Utility functions
-loadSettings = function()
-    local success, data = pcall(function()
-        return game:GetService("HttpService"):JSONDecode(readfile(saveFilePath))
-    end)
-    if success then
-        return data
-    else
-        return {}
-    end
-end
-
-saveSettings = function(settings)
-    pcall(function()
-        writefile(saveFilePath, game:GetService("HttpService"):JSONEncode(settings))
-    end)
-end
-
-makeDraggable = function(object)
-    local UserInputService = game:GetService("UserInputService")
-    local dragging
-    local dragInput
-    local dragStart
-    local startPos
-
-    local function update(input)
-        local delta = input.Position - dragStart
-        object.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
-
-    object.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = object.Position
-
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
-            end)
-        end
-    end)
-
-    object.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-            dragInput = input
-        end
-    end)
-
-    UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
-            update(input)
+local function enableNoFall()
+    runService.Stepped:Connect(function()
+        if autoFarm and humanoidRootPart then
+            humanoidRootPart.Velocity = Vector3.new(0, 0, 0)
         end
     end)
 end
 
-local function findNearestNPC()
-    local nearestNPC = nil
-    local nearestDistance = math.huge
- 
-    local Character = player.Character
-    if not Character or not Character:FindFirstChild("HumanoidRootPart") then return end
- 
-    local dungeon = workspace:FindFirstChild("dungeon")
-    if not dungeon then return end
- 
-    for _, child in ipairs(dungeon:GetChildren()) do
-        if child:FindFirstChild("enemyFolder") then
-            for _, npc in ipairs(child.enemyFolder:GetChildren()) do
-                if npc:FindFirstChild("HumanoidRootPart") and npc:FindFirstChild("Humanoid") and npc.Humanoid.Health > 0 then
-                    local distance = (Character.HumanoidRootPart.Position - npc.HumanoidRootPart.Position).Magnitude
-                    if distance < nearestDistance and distance <= enemyRange then 
-                        nearestDistance = distance
-                        nearestNPC = npc
-                    end
-                end
-            end
-        end
-    end
-    return nearestNPC
-end
-
-local function softLockCharacter(character, position)
-    if character and character:FindFirstChild("HumanoidRootPart") then
-        local connection
-        connection = game:GetService("RunService").Heartbeat:Connect(function()
-            if character.Parent and character:FindFirstChild("HumanoidRootPart") then
-                character.HumanoidRootPart.CFrame = position
-            else
-                connection:Disconnect()
-            end
-        end)
-        return connection
-    end
-end
-
-local softLockConnection
-local tpActive = false
-
-local function teleportToNPC()
-    if not tpActive then return end
-    
-    local Character = player.Character
-    if not Character or not Character:FindFirstChild("HumanoidRootPart") then return end
-
-    local npc = findNearestNPC()
-    if npc and npc:FindFirstChild("HumanoidRootPart") then
-        -- Get the direction the NPC is facing
-        local npcCFrame = npc.HumanoidRootPart.CFrame
-        local npcPosition = npcCFrame.Position
-        local npcLookVector = npcCFrame.LookVector
-        
-        -- Calculate the position behind the NPC
-        local behindPosition = npcPosition - (npcLookVector * teleportDistance)
-        behindPosition = Vector3.new(behindPosition.X, npcPosition.Y, behindPosition.Z)
-        
-        -- Create a CFrame that positions us behind the NPC, looking at the NPC
-        local lookAt = CFrame.new(behindPosition, npcPosition)
-        
-        Character.HumanoidRootPart.CFrame = lookAt
-        
-        if softLockConnection then
-            softLockConnection:Disconnect()
-        end
-        
-        softLockConnection = softLockCharacter(Character, lookAt)
-    end
-end
-
-local function mainLoop()
-    while true do
-        teleportToNPC()
-        task.wait(0.5) -- Faster update rate for more responsive teleporting
-    end
-end
-
-local function setupCharacter(character)
-    character:WaitForChild("HumanoidRootPart")
-    coroutine.wrap(mainLoop)()
-end
-
-if player.Character then
-    setupCharacter(player.Character)
-end
-
-player.CharacterAdded:Connect(setupCharacter)
-
-local killAuraActive = false
-local killAuraLoop = nil
-local function toggleKillAura(isEnabled)
-    killAuraActive = isEnabled
-    if isEnabled then
-        if not killAuraLoop then
-            killAuraLoop = spawn(function()
-                while killAuraActive do
-                    local args = {
-                        [1] = {
-                            [1] = {
-                                ["animationLength"] = 0,
-                                ["sentAt"] = tick()
-                            },
-                            [2] = "N"
-                        }
-                    }
-                    if dataRemoteEvent then
-                        dataRemoteEvent:FireServer(unpack(args))
-                    end
-                    task.wait()
-                end
-            end)
-        end
-    else
-        killAuraActive = false
-        killAuraLoop = nil
-    end
-end
-
-local abilityActive = false
-local abilityLoop = nil
-local function toggleAbility(isEnabled)
-    abilityActive = isEnabled
-    if isEnabled then
-        if not abilityLoop then
-            abilityLoop = spawn(function()
-                local VirtualInputManager = game:GetService("VirtualInputManager")
-                local lastKeyPress = 0
-                local keyPressCooldown = 0.2
-
-                while abilityActive do
-                    local Character = player.Character
-                    if Character and Character:FindFirstChild("HumanoidRootPart") then
-                        local function isNearMobs(range)
-                            for _, folder in ipairs(workspace:GetChildren()) do
-                                if folder:IsA("Folder") then
-                                    for _, child in ipairs(folder:GetChildren()) do
-                                        if child:FindFirstChild("enemyFolder") then
-                                            for _, npc in ipairs(child.enemyFolder:GetChildren()) do
-                                                if npc:FindFirstChild("HumanoidRootPart") and npc:FindFirstChild("Humanoid") and npc.Humanoid.Health > 0 then
-                                                    local distance = (Character.HumanoidRootPart.Position - npc.HumanoidRootPart.Position).Magnitude
-                                                    if distance <= range then
-                                                        return true
-                                                    end
-                                                end
-                                            end
-                                        end
-                                    end
-                                end
-                            end
-                            return false
-                        end
-
-                        if isNearMobs(enemyRange) and tick() - lastKeyPress >= keyPressCooldown then
-                            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, nil)
-                            task.wait()
-                            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, nil)
-
-                            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, nil)
-                            task.wait()
-                            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, nil)
-
-                            lastKeyPress = tick()
-                        end
-                    end
-                    wait(0.1)
-                end
-            end)
-        end
-    else
-        abilityActive = false
-        abilityLoop = nil
-    end
-end
-
-local coinTPActive = false
-local coinTPLoop = nil
-
-local function findNearestCoin()
-    local nearestCoin = nil
-    local nearestDistance = math.huge
- 
-    local Character = player.Character
-    if not Character or not Character:FindFirstChild("HumanoidRootPart") then return end
- 
-    for _, descendant in ipairs(workspace:GetDescendants()) do
-        if descendant.Name == "Coin" and descendant:IsA("BasePart") then
-            local distance = (Character.HumanoidRootPart.Position - descendant.Position).Magnitude
-            if distance < nearestDistance then
-                nearestDistance = distance
-                nearestCoin = descendant
-            end
-        end
-    end
-    return nearestCoin
-end
-
-local function toggleCoinTP(isEnabled)
-    coinTPActive = isEnabled
-    if isEnabled then
-        if not coinTPLoop then
-            coinTPLoop = spawn(function()
-                while coinTPActive do
-                    local coin = findNearestCoin()
-                    if coin and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                        local offset = Vector3.new(0, 3, 0)
-                        player.Character.HumanoidRootPart.CFrame = CFrame.new(coin.Position + offset)
-                        wait(coinStayDuration)  -- Use the coinStayDuration here
-                    else
-                        wait(0.5)
-                    end
-                end
-            end)
-        end
-    else
-        coinTPActive = false
-        if coinTPLoop then
-            coinTPLoop:Disconnect()
-            coinTPLoop = nil
-        end
-    end
-end
-
-local autoRetryActive = false
-local autoRetryLoop = nil
-
-local function toggleAutoRetry(isEnabled)
-    autoRetryActive = isEnabled
-    if isEnabled then
-        if not autoRetryLoop then
-            autoRetryLoop = spawn(function()
-                while autoRetryActive do
-                    local function checkForEndScreen()
-                        local retryVote = player.PlayerGui:FindFirstChild("RetryVote")
-                        local revivePrompt = player.PlayerGui:FindFirstChild("RevivePrompt")
-
-                        if retryVote and retryVote.Enabled then
-                            wait(1)
-                            local voteArgs = {
-                                [1] = {
-                                    [1] = {
-                                        ["\3"] = "vote",
-                                        ["vote"] = true
-                                    },
-                                    [2] = "."
-                                }
-                            }
-                            game:GetService("ReplicatedStorage").dataRemoteEvent:FireServer(unpack(voteArgs))
-                        elseif revivePrompt and revivePrompt.Enabled then
-                            wait(1)
-                            local reviveArgs = {
-                                [1] = {
-                                    [1] = {
-                                        ["\3"] = "closeRevive"
-                                    },
-                                    [2] = "\13"
-                                }
-                            }
-                            game:GetService("ReplicatedStorage").dataRemoteEvent:FireServer(unpack(reviveArgs))
-                        end
-
-                        -- Auto Start
-                        local startButton = player.PlayerGui:FindFirstChild("HUD"):FindFirstChild("Mobile"):FindFirstChild("StartButton")
-                        if startButton and startButton.Visible then
-                            wait(1)
-                            game:GetService("ReplicatedStorage").remotes.changeStartValue:FireServer(true)
-                        end
-                    end
-
-                    checkForEndScreen()
-                    wait(1)  -- Wait for 1 second before checking again
-                end
-            end)
-        end
-    else
-        autoRetryActive = false
-        if autoRetryLoop then
-            autoRetryLoop:Disconnect()
-            autoRetryLoop = nil
-        end
-    end
-end
-
-local function createSlider(parent, name, min, max, default, onChange, position)
-    local sliderContainer = Instance.new("Frame")
-    sliderContainer.Name = name .. "Container"
-    sliderContainer.Size = UDim2.new(0.9, 0, 0.08, 0)
-    sliderContainer.Position = position
-    sliderContainer.BackgroundTransparency = 1
-    sliderContainer.Parent = parent
-    
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, 0, 0.4, 0)
-    label.Position = UDim2.new(0, 0, 0, 0)
-    label.BackgroundTransparency = 1
-    label.Text = name .. ": " .. default
-    label.TextColor3 = Color3.fromRGB(255, 255, 255)
-    label.Font = Enum.Font.GothamBold
-    label.TextSize = 14
-    label.TextXAlignment = Enum.TextXAlignment.Left
-    label.Parent = sliderContainer
-    
-    local sliderBack = Instance.new("Frame")
-    sliderBack.Size = UDim2.new(1, 0, 0.2, 0)
-    sliderBack.Position = UDim2.new(0, 0, 0.5, 0)
-    sliderBack.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
-    sliderBack.BackgroundTransparency = 0.5
-    sliderBack.BorderSizePixel = 0
-    sliderBack.Parent = sliderContainer
-    
-    local sliderFill = Instance.new("Frame")
-    sliderFill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
-    sliderFill.Position = UDim2.new(0, 0, 0, 0)
-    sliderFill.BackgroundColor3 = Color3.fromRGB(86, 71, 201)
-    sliderFill.BorderSizePixel = 0
-    sliderFill.Parent = sliderBack
-    
-    local sliderKnob = Instance.new("Frame")
-    sliderKnob.Size = UDim2.new(0, 10, 1.6, 0)
-    sliderKnob.Position = UDim2.new((default - min) / (max - min), -5, 0, -5)
-    sliderKnob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    sliderKnob.BorderSizePixel = 0
-    sliderKnob.ZIndex = 2
-    sliderKnob.Parent = sliderBack
-    
-    local knobCorner = Instance.new("UICorner")
-    knobCorner.CornerRadius = UDim.new(0.5, 0)
-    knobCorner.Parent = sliderKnob
-    
-    local UICorner = Instance.new("UICorner")
-    UICorner.CornerRadius = UDim.new(0.5, 0)
-    UICorner.Parent = sliderBack
-    
-    local UICorner2 = Instance.new("UICorner")
-    UICorner2.CornerRadius = UDim.new(0.5, 0)
-    UICorner2.Parent = sliderFill
-    
-    local value = default
-    
-    local function updateSlider(newValue)
-        value = math.clamp(newValue, min, max)
-        local percent = (value - min) / (max - min)
-        
-        sliderFill.Size = UDim2.new(percent, 0, 1, 0)
-        sliderKnob.Position = UDim2.new(percent, -5, 0, -5)
-        label.Text = name .. ": " .. math.floor(value)
-        
-        onChange(value)
-    end
-    
-    local isDragging = false
-    
-    sliderBack.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            isDragging = true
-            local relativeX = input.Position.X - sliderBack.AbsolutePosition.X
-            local percent = math.clamp(relativeX / sliderBack.AbsoluteSize.X, 0, 1)
-            local newValue = min + (max - min) * percent
-            updateSlider(newValue)
-        end
-    end)
-    
-    sliderBack.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            isDragging = false
-        end
-    end)
-    
-    game:GetService("UserInputService").InputChanged:Connect(function(input)
-        if isDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local relativeX = input.Position.X - sliderBack.AbsolutePosition.X
-            local percent = math.clamp(relativeX / sliderBack.AbsoluteSize.X, 0, 1)
-            local newValue = min + (max - min) * percent
-            updateSlider(newValue)
-        end
-    end)
-    
-    return {
-        setValue = updateSlider,
-        getValue = function() return value end
-    }
-end
-
-local function createGui()
-    if gui then 
-        gui:Destroy() 
-    end
-    
-    local ScreenGui = Instance.new("ScreenGui")
-    local MainFrame = Instance.new("Frame")
-    local ImageLabel = Instance.new("ImageLabel")
-    local CloseButton = Instance.new("TextButton")
-    local ButtonContainer = Instance.new("Frame")
-    local HeaderLabel = Instance.new("TextLabel")
-    local SliderContainer = Instance.new("Frame")
-    
-    -- ScreenGui setup
-    ScreenGui.Name = "PersistentGUI"
-    ScreenGui.ResetOnSpawn = false
-    ScreenGui.DisplayOrder = 999999999
-    ScreenGui.Parent = game.Players.LocalPlayer.PlayerGui
-    
-    -- CloseButton setup
-    CloseButton.Size = UDim2.new(0, 150, 0, 45)
-    CloseButton.Position = UDim2.new(0.5, -75, 0, -40) -- Changed to center horizontally and moved higher
-    CloseButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    CloseButton.BackgroundTransparency = 0.3
-    CloseButton.Text = "Open/Close"
-    CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    CloseButton.Font = Enum.Font.GothamBlack
-    CloseButton.TextSize = 16
-    CloseButton.Parent = ScreenGui
-    CloseButton.ZIndex = 10
-    
-    -- Add corner to close button
-    local closeCorner = Instance.new("UICorner")
-    closeCorner.CornerRadius = UDim.new(0.3, 0)
-    closeCorner.Parent = CloseButton
-    
-    -- Add stroke to close button
-    local closeStroke = Instance.new("UIStroke")
-    closeStroke.Color = Color3.fromRGB(255, 255, 255)
-    closeStroke.Transparency = 0.8
-    closeStroke.Thickness = 1
-    closeStroke.Parent = CloseButton
-    
-    -- MainFrame setup
-    MainFrame.Size = UDim2.new(0.25, 0, 0.75, 0) -- Made taller for more content
-    MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-    MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-    MainFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 15) -- Darker background
-    MainFrame.BackgroundTransparency = 0.2 -- Less transparent
-    MainFrame.BorderSizePixel = 0
-    MainFrame.ClipsDescendants = true
-    MainFrame.Visible = true
-    MainFrame.ZIndex = 1
-    MainFrame.Parent = ScreenGui
-    
-    -- Add gradient to MainFrame
-    local gradient = Instance.new("UIGradient")
-    gradient.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(30, 30, 50)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 10, 20))
-    })
-    gradient.Rotation = 45
-    gradient.Parent = MainFrame
-    
-    -- Header setup
-    HeaderLabel.Size = UDim2.new(1, 0, 0.08, 0)
-    HeaderLabel.Position = UDim2.new(0, 0, 0, 0)
-    HeaderLabel.BackgroundTransparency = 0.5
-    HeaderLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 50)
-    HeaderLabel.Text = "Enhanced Kinayo Script"
-    HeaderLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    HeaderLabel.Font = Enum.Font.GothamBold
-    HeaderLabel.TextSize = 24
-    HeaderLabel.ZIndex = 3
-    HeaderLabel.Parent = MainFrame
-    
-    -- Add line under header
-    local headerLine = Instance.new("Frame")
-    headerLine.Size = UDim2.new(0.9, 0, 0.002, 0)
-    headerLine.Position = UDim2.new(0.05, 0, 0.08, 0)
-    headerLine.BackgroundColor3 = Color3.fromRGB(86, 71, 201)
-    headerLine.BorderSizePixel = 0
-    headerLine.ZIndex = 3
-    headerLine.Parent = MainFrame
-    
-    -- Slider container setup
-    SliderContainer.Size = UDim2.new(0.9, 0, 0.2, 0)
-    SliderContainer.Position = UDim2.new(0.05, 0, 0.1, 0)
-    SliderContainer.BackgroundTransparency = 1
-    SliderContainer.Parent = MainFrame
-    
-    -- Button Container setup
-    ButtonContainer.Size = UDim2.new(0.9, 0, 0.5, 0)
-    ButtonContainer.Position = UDim2.new(0.05, 0, 0.35, 0)
-    ButtonContainer.BackgroundTransparency = 1
-    ButtonContainer.Parent = MainFrame
-    
-    local mainFrameCorner = Instance.new("UICorner")
-    mainFrameCorner.CornerRadius = UDim.new(0.03, 0)
-    mainFrameCorner.Parent = MainFrame
-    
-    -- Grid layout for buttons
-    local UIGridLayout = Instance.new("UIGridLayout")
-    UIGridLayout.Parent = ButtonContainer
-    UIGridLayout.CellSize = UDim2.new(0.48, -5, 0.15, 0) -- Taller buttons
-    UIGridLayout.CellPadding = UDim2.new(0, 10, 0, 10) -- More spacing
-    UIGridLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    UIGridLayout.FillDirectionMaxCells = 2
-    UIGridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-    UIGridLayout.VerticalAlignment = Enum.VerticalAlignment.Top
-    
-    -- Make frames draggable
-    makeDraggable(CloseButton)
-    makeDraggable(MainFrame)
-    
-    local savedSettings = loadSettings()
-    
-    -- Load saved settings for sliders
-    enemyRange = savedSettings["EnemyRange"] or 20
-    teleportDistance = savedSettings["TeleportDistance"] or 5
-    coinStayDuration = savedSettings["CoinStayDuration"] or 5
-    
-    -- Create sliders
-    local enemyRangeSlider = createSlider(
-        SliderContainer, 
-        "Enemy Range", 
-        5, 
-        100, 
-        enemyRange, 
-        function(value) 
-            enemyRange = value 
-            savedSettings["EnemyRange"] = value
-            saveSettings(savedSettings)
-        end, 
-        UDim2.new(0, 0, 0, 0)
-    )
-    
-    local teleportDistanceSlider = createSlider(
-        SliderContainer, 
-        "TP Distance", 
-        1, 
-        20, 
-        teleportDistance, 
-        function(value) 
-            teleportDistance = value 
-            savedSettings["TeleportDistance"] = value
-            saveSettings(savedSettings)
-        end, 
-        UDim2.new(0, 0, 0.45, 0)
-    )
-    
-    local function createToggleButton(number, name, onClick)
-        local button = Instance.new("TextButton")
-        button.Size = UDim2.new(1, 0, 1, 0)
-        button.BackgroundTransparency = 0.1
-        button.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
-        button.Text = name
-        button.TextColor3 = Color3.fromRGB(255, 255, 255)
-        button.Font = Enum.Font.GothamBold
-        button.TextSize = 16
-        button.LayoutOrder = number
-        button.Parent = ButtonContainer
-        button.ZIndex = 2
-        
-        -- Add rounder corners to button
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0.2, 0)
-        corner.Parent = button
-        
-        -- Add stroke to button
-        local stroke = Instance.new("UIStroke")
-        stroke.Color = Color3.fromRGB(86, 71, 201)
-        stroke.Transparency = 0.5
-        stroke.Thickness = 2
-        stroke.Parent = button
-        
-        -- Add icon container
-        local iconContainer = Instance.new("Frame")
-        iconContainer.Size = UDim2.new(0.1, 0, 0.6, 0)
-        iconContainer.Position = UDim2.new(0.05, 0, 0.2, 0)
-        iconContainer.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-        iconContainer.BackgroundTransparency = 0.9
-        iconContainer.BorderSizePixel = 0
-        iconContainer.ZIndex = 3
-        iconContainer.Parent = button
-        
-        local iconCorner = Instance.new("UICorner")
-        iconCorner.CornerRadius = UDim.new(0.3, 0)
-        iconCorner.Parent = iconContainer
-        
-        local isEnabled = savedSettings[name] or false
-        
-        local function updateButtonAppearance()
-            if isEnabled then
-                button.BackgroundColor3 = Color3.fromRGB(86, 71, 201)
-                button.TextColor3 = Color3.fromRGB(255, 255, 255)
-                iconContainer.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-                iconContainer.BackgroundTransparency = 0
-                stroke.Color = Color3.fromRGB(255, 255, 255)
-            else
-                button.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
-                button.TextColor3 = Color3.fromRGB(255, 255, 255)
-                iconContainer.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-                iconContainer.BackgroundTransparency = 0.9
-                stroke.Color = Color3.fromRGB(86, 71, 201)
-            end
-        end
-        
-        updateButtonAppearance()
-        
-        if isEnabled then
-            onClick(true)
-        end
-        
-        button.MouseButton1Click:Connect(function()
-            isEnabled = not isEnabled
-            updateButtonAppearance()
-            onClick(isEnabled)
-            savedSettings[name] = isEnabled
-            saveSettings(savedSettings)
-        end)
-    end
-    
-    createToggleButton(1, "TP Behind Mob", function(enabled) tpActive = enabled end)
-    createToggleButton(2, "Kill Aura", toggleKillAura)
-    createToggleButton(3, "Auto Ability", toggleAbility)
-    createToggleButton(4, "Coin TP", toggleCoinTP)
-    createToggleButton(5, "Auto Retry-Start", toggleAutoRetry)
-    
-    -- Version indicator
-    local versionLabel = Instance.new("TextLabel")
-    versionLabel.Size = UDim2.new(1, 0, 0.05, 0)
-    versionLabel.Position = UDim2.new(0, 0, 0.94, 0)
-    versionLabel.BackgroundTransparency = 1
-    versionLabel.Text = "v2.0 | Enhanced Edition"
-    versionLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-    versionLabel.Font = Enum.Font.Gotham
-    versionLabel.TextSize = 14
-    versionLabel.ZIndex = 2
-    versionLabel.Parent = MainFrame
-    
-    CloseButton.MouseButton1Click:Connect(function()
-        MainFrame.Visible = not MainFrame.Visible
-    end)
-    
-    gui = ScreenGui
-    mainFrame = MainFrame
-    closeButton = CloseButton
-    
-    return ScreenGui, MainFrame, CloseButton
-end
-
--- Initialize the GUI
-createGui()
+enableNoFall()
+startOrbiting()
+attack()
