@@ -114,7 +114,7 @@ local function stopAutoFarm()
     autoFarm = false
     if connection then connection:Disconnect() end
     -- Not unanchoring to keep character always anchored
-}
+end
 
 local function enableNoFall()
     runService.Stepped:Connect(function()
