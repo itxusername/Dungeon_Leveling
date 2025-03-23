@@ -17,6 +17,12 @@ end
 local function getClosestMob()
     local closestMob = nil
     local closestDistance = math.huge
+    
+    -- Make sure workspace.Characters exists
+    if not workspace:FindFirstChild("Characters") then
+        return nil
+    end
+    
     for _, mob in ipairs(workspace.Characters:GetChildren()) do
         if mob:IsA("Model") and mob ~= character and mob:FindFirstChild("HumanoidRootPart") then
             local dist = (mob.HumanoidRootPart.Position - humanoidRootPart.Position).Magnitude
@@ -30,33 +36,75 @@ local function getClosestMob()
 end
 
 local function isInRange(mob, range)
+    if not mob then return false end
     local mobRootPart = mob:FindFirstChild("HumanoidRootPart")
     if not mobRootPart or not humanoidRootPart then return false end
     return (mobRootPart.Position - humanoidRootPart.Position).Magnitude <= range
 end
 
 local function equipWeapon()
-    local args = {
-        [1] = "Equip/UnEquip"
-    }
-    game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("WeaponsEvent"):FireServer(unpack(args))
+    local weaponsEvent = game:GetService("ReplicatedStorage"):FindFirstChild("Events")
+    
+    if weaponsEvent and weaponsEvent:FindFirstChild("WeaponsEvent") then
+        local args = {
+            [1] = "Equip/UnEquip"
+        }
+        weaponsEvent:FindFirstChild("WeaponsEvent"):FireServer(unpack(args))
+    else
+        warn("WeaponsEvent not found")
+    end
 end
 
-equipWeapon()
+-- Make sure the events exist before trying to use them
+local replicatedStorage = game:GetService("ReplicatedStorage")
+local events = replicatedStorage:FindFirstChild("Events")
+
+if events then
+    -- Try to equip weapon
+    pcall(function()
+        equipWeapon()
+    end)
+else
+    warn("Events folder not found in ReplicatedStorage")
+end
 
 local function useSkill(skillName)
+    -- Make sure the Skill event exists
+    local skillEvent = events and events:FindFirstChild("Skill")
+    if not skillEvent then
+        warn("Skill event not found")
+        return
+    end
+    
     local args = {
         [1] = { ["Skill"] = skillName, ["Function"] = "Activate" },
         [2] = humanoidRootPart.Position,
         [3] = true
     }
-    game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Skill"):FireServer(unpack(args))
+    
+    pcall(function()
+        skillEvent:FireServer(unpack(args))
+    end)
 end
 
 local function attack()
+    local combatEvent = events and events:FindFirstChild("Combat")
+    if not combatEvent then
+        warn("Combat event not found")
+        return
+    end
+    
     while autoFarm do
         local mob = getClosestMob()
+        
         if mob and mob:FindFirstChild("HumanoidRootPart") then
+            -- Check if the character still exists
+            if not character or not character:FindFirstChild("HumanoidRootPart") then
+                warn("Character or HumanoidRootPart no longer exists")
+                stopAutoFarm()
+                return
+            end
+            
             humanoidRootPart.Anchored = false
             
             orbitAngle = orbitAngle + 10
@@ -74,8 +122,10 @@ local function attack()
             local lookAtPosition = mobPosition + Vector3.new(0, 1, 0)
             humanoidRootPart.CFrame = CFrame.new(targetPosition, lookAtPosition)
             
-            game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Combat")
-                :FireServer("Attack")
+            pcall(function()
+                combatEvent:FireServer("Attack")
+            end)
+            
             useSkill("FlurryOfBlows")
             useSkill("BloodyCut")
             useSkill("Invisibility")
@@ -94,6 +144,13 @@ local function startOrbiting()
     if connection then connection:Disconnect() end
     
     connection = runService.Heartbeat:Connect(function()
+        -- Check if character still exists
+        if not character or not character:FindFirstChild("HumanoidRootPart") then
+            warn("Character or HumanoidRootPart no longer exists")
+            if connection then connection:Disconnect() end
+            return
+        end
+        
         local mob = getClosestMob()
         if mob and mob:FindFirstChild("HumanoidRootPart") and autoFarm then
             humanoidRootPart.Anchored = false
@@ -118,18 +175,32 @@ end
 
 local function stopAutoFarm()
     autoFarm = false
-    humanoidRootPart.Anchored = false
+    if humanoidRootPart then
+        humanoidRootPart.Anchored = false
+    end
     if connection then connection:Disconnect() end
 end
 
 local function enableNoFall()
     runService.Stepped:Connect(function()
-        if autoFarm and humanoidRootPart then
-            humanoidRootPart.Velocity = Vector3.new(0, 0, 0)
+        if autoFarm and character and character:FindFirstChild("HumanoidRootPart") then
+            character.HumanoidRootPart.Velocity = Vector3.new(0, 0, 0)
         end
     end)
 end
 
-enableNoFall()
-startOrbiting()
-attack()
+-- Define stopAutoFarm before it's called
+_G.stopAutoFarm = stopAutoFarm
+
+-- Add error handling to main functions
+pcall(function()
+    enableNoFall()
+end)
+
+pcall(function()
+    startOrbiting()
+end)
+
+pcall(function()
+    attack()
+end)
