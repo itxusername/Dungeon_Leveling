@@ -8,7 +8,7 @@ local autoFarm = true
 local HIT_RANGE = 10
 local orbitRadius = 10
 local orbitAngle = 0
-local heightOffset = 2.5  -- Changed from -0.5 to 2.5
+local heightOffset = 2.5  -- Height offset now decreased by 0.5 studs
 
 local function isArcher(mob)
     return mob.Name:lower():find("archer") ~= nil 
@@ -60,7 +60,7 @@ local function attack()
             -- Set anchored to false before teleporting
             humanoidRootPart.Anchored = false
             
-            orbitAngle = orbitAngle + 45  -- Larger increment for less frequent updates
+            orbitAngle = orbitAngle + 10
             if orbitAngle >= 360 then orbitAngle = 0 end
             
             local angle = math.rad(orbitAngle)
@@ -68,9 +68,10 @@ local function attack()
             local z = math.sin(angle) * orbitRadius
             
             local mobPosition = mob.HumanoidRootPart.Position
+            -- Lower Y position by 0.5
             local targetPosition = mobPosition + Vector3.new(x, heightOffset, z)
             
-            -- Directly teleport to position
+            -- Directly teleport to position instead of tweening
             local lookAtPosition = mobPosition + Vector3.new(0, 1, 0)
             humanoidRootPart.CFrame = CFrame.new(targetPosition, lookAtPosition)
             
@@ -83,47 +84,40 @@ local function attack()
             useSkill("BloodyCut")
             useSkill("Invisibility")
             
-            -- Wait 1 second before teleporting again
-            task.wait(1)
+            task.wait(0.1)
         else
             task.wait(0.5)
         end
     end
 end
 
--- Changed the orbit function to use a timer instead of Heartbeat
+local connection
 local function startOrbiting()
-    -- Remove previous connection if exists
     if connection then connection:Disconnect() end
     
-    -- Start a new loop that teleports every 1 second
-    task.spawn(function()
-        while autoFarm do
-            local mob = getClosestMob()
-            if mob and mob:FindFirstChild("HumanoidRootPart") then
-                -- Set anchored to false before teleporting
-                humanoidRootPart.Anchored = false
-                
-                orbitAngle = orbitAngle + 45  -- Move in larger increments
-                if orbitAngle >= 360 then orbitAngle = 0 end
-                
-                local angle = math.rad(orbitAngle)
-                local x = math.cos(angle) * orbitRadius
-                local z = math.sin(angle) * orbitRadius
-                
-                local mobPosition = mob.HumanoidRootPart.Position
-                local targetPosition = mobPosition + Vector3.new(x, heightOffset, z)
-                
-                -- Directly teleport to position
-                local lookAtPosition = mobPosition + Vector3.new(0, 1, 0)
-                humanoidRootPart.CFrame = CFrame.new(targetPosition, lookAtPosition)
-                
-                -- Set anchored to true after teleporting
-                humanoidRootPart.Anchored = true
-            end
+    connection = runService.Heartbeat:Connect(function()
+        local mob = getClosestMob()
+        if mob and mob:FindFirstChild("HumanoidRootPart") and autoFarm then
+            -- Set anchored to false before teleporting
+            humanoidRootPart.Anchored = false
             
-            -- Wait exactly 1 second before next teleport
-            task.wait(1)
+            orbitAngle = orbitAngle + 2.5
+            if orbitAngle >= 360 then orbitAngle = 0 end
+            
+            local angle = math.rad(orbitAngle)
+            local x = math.cos(angle) * orbitRadius
+            local z = math.sin(angle) * orbitRadius
+            
+            local mobPosition = mob.HumanoidRootPart.Position
+            -- Lower Y position by 0.5
+            local targetPosition = mobPosition + Vector3.new(x, heightOffset, z)
+            
+            -- Directly teleport to position instead of tweening
+            local lookAtPosition = mobPosition + Vector3.new(0, 1, 0)
+            humanoidRootPart.CFrame = CFrame.new(targetPosition, lookAtPosition)
+            
+            -- Set anchored to true after teleporting
+            humanoidRootPart.Anchored = true
         end
     end)
 end
