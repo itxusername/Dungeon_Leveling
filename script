@@ -2,19 +2,22 @@ local player = game.Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 local runService = game:GetService("RunService")
-local userInput = game:GetService("UserInputService")
-local tweenService = game:GetService("TweenService")
+local replicatedStorage = game:GetService("ReplicatedStorage")
 local autoFarm = true
-local HIT_RANGE = 10
-local heightOffset = -2.5  -- Negative height offset to position under the mob
-
-local function isArcher(mob)
-    return mob.Name:lower():find("archer") ~= nil 
-end
+local orbitRadius = 10
+local orbitAngle = 0
+local heightOffset = 2.5
+local teleportInterval = 0.5 -- Teleport every 0.5 seconds
 
 local function getClosestMob()
     local closestMob = nil
     local closestDistance = math.huge
+    
+    -- Make sure workspace.Characters exists
+    if not workspace:FindFirstChild("Characters") then
+        return nil
+    end
+    
     for _, mob in ipairs(workspace.Characters:GetChildren()) do
         if mob:IsA("Model") and mob ~= character and mob:FindFirstChild("HumanoidRootPart") then
             local dist = (mob.HumanoidRootPart.Position - humanoidRootPart.Position).Magnitude
@@ -27,100 +30,131 @@ local function getClosestMob()
     return closestMob
 end
 
-local function isInRange(mob, range)
-    local mobRootPart = mob:FindFirstChild("HumanoidRootPart")
-    if not mobRootPart or not humanoidRootPart then return false end
-    return (mobRootPart.Position - humanoidRootPart.Position).Magnitude <= range
-end
-
 local function equipWeapon()
-    local args = {
-        [1] = "Equip/UnEquip"
-    }
-    game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("WeaponsEvent"):FireServer(unpack(args))
+    local events = replicatedStorage:FindFirstChild("Events")
+    if events and events:FindFirstChild("WeaponsEvent") then
+        local args = {
+            [1] = "Equip/UnEquip"
+        }
+        events:FindFirstChild("WeaponsEvent"):FireServer(unpack(args))
+    else
+        warn("WeaponsEvent not found")
+    end
 end
 
-equipWeapon()
+-- Try to equip weapon
+pcall(function()
+    equipWeapon()
+end)
 
 local function useSkill(skillName)
+    local events = replicatedStorage:FindFirstChild("Events")
+    local skillEvent = events and events:FindFirstChild("Skill")
+    if not skillEvent then
+        warn("Skill event not found")
+        return
+    end
+    
     local args = {
         [1] = { ["Skill"] = skillName, ["Function"] = "Activate" },
         [2] = humanoidRootPart.Position,
         [3] = true
     }
-    game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Skill"):FireServer(unpack(args))
+    
+    pcall(function()
+        skillEvent:FireServer(unpack(args))
+    end)
 end
 
-local function tweenToMob(mob)
-    if not mob or not mob:FindFirstChild("HumanoidRootPart") or not humanoidRootPart then return end
+local function teleportAndAttack()
+    -- Ensure character is anchored from the start
+    if humanoidRootPart then
+        humanoidRootPart.Anchored = true
+    end
     
-    -- Set anchored to false before tweening
-    humanoidRootPart.Anchored = false
-    
-    local mobPosition = mob.HumanoidRootPart.Position
-    local targetPosition = mobPosition + Vector3.new(0, heightOffset, 0)  -- Position directly under the mob
-    
-    -- Create tween info
-    local tweenInfo = TweenInfo.new(
-        0.2,  -- Time to complete tween
-        Enum.EasingStyle.Quad,
-        Enum.EasingDirection.Out
-    )
-    
-    -- Create the tween
-    local tween = tweenService:Create(
-        humanoidRootPart, 
-        tweenInfo, 
-        {CFrame = CFrame.new(targetPosition, Vector3.new(mobPosition.X, targetPosition.Y, mobPosition.Z))}  -- Face the mob
-    )
-    
-    -- Start the tween
-    tween:Play()
-    
-    -- Wait for tween to complete
-    tween.Completed:Wait()
-    
-    -- Set anchored to true after tweening
-    humanoidRootPart.Anchored = true
-    
-    -- Ensure we're looking at the mob after tweening
-    local lookAtPosition = mobPosition
-    humanoidRootPart.CFrame = CFrame.lookAt(humanoidRootPart.Position, lookAtPosition)
-end
-
-local function attack()
     while autoFarm do
+        local events = replicatedStorage:FindFirstChild("Events")
+        local combatEvent = events and events:FindFirstChild("Combat")
+        
         local mob = getClosestMob()
-        if mob and mob:FindFirstChild("HumanoidRootPart") then
-            -- Tween to position under the mob
-            tweenToMob(mob)
+        
+        if mob and mob:FindFirstChild("HumanoidRootPart") and humanoidRootPart then
+            -- Calculate new position around the mob
+            orbitAngle = orbitAngle + 45 -- Larger angle increments for distinct positions
+            if orbitAngle >= 360 then orbitAngle = 0 end
             
-            -- Perform attacks
-            game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Combat")
-                :FireServer("Attack")
+            local angle = math.rad(orbitAngle)
+            local x = math.cos(angle) * orbitRadius
+            local z = math.sin(angle) * orbitRadius
+            
+            local mobPosition = mob.HumanoidRootPart.Position
+            -- Add height offset to avoid traps
+            local targetPosition = mobPosition + Vector3.new(x, heightOffset, z)
+            
+            -- Teleport to the new position and look at the mob
+            local lookAtPosition = mobPosition + Vector3.new(0, 1, 0)
+            humanoidRootPart.CFrame = CFrame.new(targetPosition, lookAtPosition)
+            
+            -- Ensure we're still anchored after teleport
+            humanoidRootPart.Anchored = true
+            
+            -- Attack and use skills
+            if combatEvent then
+                pcall(function()
+                    combatEvent:FireServer("Attack")
+                end)
+            end
+            
             useSkill("FlurryOfBlows")
             useSkill("BloodyCut")
             useSkill("Invisibility")
-            
-            task.wait(0.1)
-        else
-            task.wait(0.5)
         end
+        
+        -- Wait for the specified teleport interval
+        task.wait(teleportInterval)
     end
 end
 
 local function stopAutoFarm()
     autoFarm = false
-    humanoidRootPart.Anchored = false
+    if humanoidRootPart then
+        humanoidRootPart.Anchored = false
+    end
 end
 
 local function enableNoFall()
     runService.Stepped:Connect(function()
-        if autoFarm and humanoidRootPart then
-            humanoidRootPart.Velocity = Vector3.new(0, 0, 0)
+        if autoFarm and character and character:FindFirstChild("HumanoidRootPart") then
+            -- Keep velocity at zero and make sure we stay anchored
+            character.HumanoidRootPart.Velocity = Vector3.new(0, 0, 0)
+            character.HumanoidRootPart.Anchored = true
         end
     end)
 end
 
-enableNoFall()
-attack()
+-- Make stopAutoFarm globally accessible
+_G.stopAutoFarm = stopAutoFarm
+
+-- Set character to be anchored from the start
+if humanoidRootPart then
+    humanoidRootPart.Anchored = true
+end
+
+-- Enable no fall damage protection
+pcall(function()
+    enableNoFall()
+end)
+
+-- Start the teleport and attack function
+pcall(function()
+    teleportAndAttack()
+end)
+
+-- Create a safety backup to ensure anchoring if the character respawns
+player.CharacterAdded:Connect(function(newCharacter)
+    character = newCharacter
+    humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+    if autoFarm then
+        humanoidRootPart.Anchored = true
+    end
+end)
