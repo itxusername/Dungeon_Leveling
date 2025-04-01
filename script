@@ -1,7 +1,6 @@
 local player = game.Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-local humanoid = character:WaitForChild("Humanoid")
 local runService = game:GetService("RunService")
 local userInput = game:GetService("UserInputService")
 local tweenService = game:GetService("TweenService")
@@ -106,76 +105,72 @@ local function equipWeapon()
     game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("WeaponsEvent"):FireServer(unpack(args))
 end
 
-local function useSkill(skillName, targetPos)
+local function useSkill(skillName)
+    local mob = getClosestMob()
+    if not mob or not mob:FindFirstChild("HumanoidRootPart") then return end
+    
+    local targetPosition = mob.HumanoidRootPart.Position
+    
     local args = {
         [1] = { ["Skill"] = skillName, ["Function"] = "Activate" },
-        [2] = targetPos,
+        [2] = targetPosition,
         [3] = true
     }
     game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Skill"):FireServer(unpack(args))
 end
 
-local function attackEnemy(mob)
+local function attackEnemy()
+    local mob = getClosestMob()
     if mob and mob:FindFirstChild("HumanoidRootPart") then
-        local args = { [1] = "Attack" }
-        game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Combat"):FireServer(unpack(args))
+        local mobRoot = mob.HumanoidRootPart
         
-        task.wait(0.1)
+        local lookAtPosition = mobRoot.Position
+        humanoidRootPart.CFrame = CFrame.lookAt(humanoidRootPart.Position, lookAtPosition)
         
-        local alternateArgs = {
-            [1] = mob,
-            [2] = mob.HumanoidRootPart.Position
-        }
+        game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Combat"):FireServer("Attack")
         
-        pcall(function()
-            game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Combat"):FireServer("Attack", unpack(alternateArgs))
-        end)
+        local targetParts = {"HumanoidRootPart", "Torso", "UpperTorso", "Head"}
+        for _, partName in ipairs(targetParts) do
+            local targetPart = mob:FindFirstChild(partName)
+            if targetPart then
+                local args = {
+                    [1] = "Attack",
+                    [2] = mob,
+                    [3] = targetPart.Position
+                }
+                game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Combat"):FireServer(unpack(args))
+                break
+            end
+        end
     end
-end
-
-local function teleportToMob(mob)
-    if mob and mob:FindFirstChild("HumanoidRootPart") then
-        humanoidRootPart.Anchored = false
-        
-        orbitAngle = orbitAngle + 10
-        if orbitAngle >= 360 then orbitAngle = 0 end
-        
-        local angle = math.rad(orbitAngle)
-        local x = math.cos(angle) * orbitRadius
-        local z = math.sin(angle) * orbitRadius
-        
-        local mobPosition = mob.HumanoidRootPart.Position
-        local targetPosition = mobPosition + Vector3.new(x, heightOffset, z)
-        
-        local tweenInfo = TweenInfo.new(0.15, Enum.EasingStyle.Linear)
-        local tween = tweenService:Create(humanoidRootPart, tweenInfo, {CFrame = CFrame.new(targetPosition, mobPosition)})
-        tween:Play()
-        tween.Completed:Wait()
-        
-        humanoidRootPart.CFrame = CFrame.new(targetPosition, mobPosition + Vector3.new(0, 1, 0))
-        humanoidRootPart.Anchored = true
-        
-        return true
-    end
-    return false
 end
 
 local function attackLoop()
     while autoFarm do
         local mob = getClosestMob()
-        if teleportToMob(mob) then
-            attackEnemy(mob)
+        if mob and mob:FindFirstChild("HumanoidRootPart") then
+            humanoidRootPart.Anchored = false
             
-            local healthPercent = humanoid.Health / humanoid.MaxHealth * 100
-            if healthPercent <= 40 then
-                useSkill("FlurryOfBlows", mob.HumanoidRootPart.Position)
-            end
-            if healthPercent <= 35 then
-                useSkill("BloodyCut", mob.HumanoidRootPart.Position)
-            end
-            if healthPercent <= 30 then
-                useSkill("Invisibility", mob.HumanoidRootPart.Position)
-            end
+            orbitAngle = orbitAngle + 10
+            if orbitAngle >= 360 then orbitAngle = 0 end
+            
+            local angle = math.rad(orbitAngle)
+            local x = math.cos(angle) * orbitRadius
+            local z = math.sin(angle) * orbitRadius
+            
+            local mobPosition = mob.HumanoidRootPart.Position
+            local targetPosition = mobPosition + Vector3.new(x, heightOffset, z)
+            
+            local lookAtPosition = mobPosition
+            humanoidRootPart.CFrame = CFrame.new(targetPosition, lookAtPosition)
+            
+            humanoidRootPart.Anchored = true
+            
+            attackEnemy()
+            
+            useSkill("FlurryOfBlows")
+            useSkill("BloodyCut")
+            useSkill("Invisibility")
             
             task.wait(0.1)
         else
@@ -191,7 +186,22 @@ local function startOrbiting()
     orbitConnection = runService.Heartbeat:Connect(function()
         local mob = getClosestMob()
         if mob and mob:FindFirstChild("HumanoidRootPart") and autoFarm then
-            teleportToMob(mob)
+            humanoidRootPart.Anchored = false
+            
+            orbitAngle = orbitAngle + 2.5
+            if orbitAngle >= 360 then orbitAngle = 0 end
+            
+            local angle = math.rad(orbitAngle)
+            local x = math.cos(angle) * orbitRadius
+            local z = math.sin(angle) * orbitRadius
+            
+            local mobPosition = mob.HumanoidRootPart.Position
+            local targetPosition = mobPosition + Vector3.new(x, heightOffset, z)
+            
+            local lookAtPosition = mobPosition
+            humanoidRootPart.CFrame = CFrame.new(targetPosition, lookAtPosition)
+            
+            humanoidRootPart.Anchored = true
         end
     end)
 end
@@ -202,6 +212,14 @@ local function stopAutoFarm()
     if orbitConnection then orbitConnection:Disconnect() end
 end
 
+local function enableNoFall()
+    runService.Stepped:Connect(function()
+        if autoFarm and humanoidRootPart then
+            humanoidRootPart.Velocity = Vector3.new(0, 0, 0)
+        end
+    end)
+end
+
 local abilityActive = false
 local abilityLoop = nil
 local function toggleAbility(isEnabled)
@@ -210,21 +228,9 @@ local function toggleAbility(isEnabled)
         if not abilityLoop then
             abilityLoop = spawn(function()
                 while abilityActive do
-                    local mob = getClosestMob()
-                    if mob and mob:FindFirstChild("HumanoidRootPart") then
-                        local healthPercent = humanoid.Health / humanoid.MaxHealth * 100
-                        local targetPos = mob.HumanoidRootPart.Position
-                        
-                        if healthPercent <= 40 then
-                            useSkill("FlurryOfBlows", targetPos)
-                        end
-                        if healthPercent <= 35 then
-                            useSkill("BloodyCut", targetPos)
-                        end
-                        if healthPercent <= 30 then
-                            useSkill("Invisibility", targetPos)
-                        end
-                    end
+                    useSkill("FlurryOfBlows")
+                    useSkill("BloodyCut")
+                    useSkill("Invisibility")
                     task.wait(1)
                 end
             end)
@@ -242,6 +248,7 @@ createGui = function()
     
     local ScreenGui = Instance.new("ScreenGui")
     local MainFrame = Instance.new("Frame")
+    local ImageLabel = Instance.new("ImageLabel")
     local CloseButton = Instance.new("TextButton")
     local ButtonContainer = Instance.new("Frame")
     local HeaderLabel = Instance.new("TextLabel")
@@ -253,45 +260,49 @@ createGui = function()
     
     CloseButton.Size = UDim2.new(0, 150, 0, 45)
     CloseButton.Position = UDim2.new(0.5, -75, 0, -40)
-    CloseButton.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-    CloseButton.BackgroundTransparency = 0.2
+    CloseButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    CloseButton.BackgroundTransparency = 0.3
     CloseButton.Text = "Open/Close"
     CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    CloseButton.Font = Enum.Font.GothamBold
+    CloseButton.Font = Enum.Font.GothamBlack
     CloseButton.TextSize = 16
     CloseButton.Parent = ScreenGui
     CloseButton.ZIndex = 10
     
     local closeCorner = Instance.new("UICorner")
-    closeCorner.CornerRadius = UDim.new(0.2, 0)
+    closeCorner.CornerRadius = UDim.new(0.3, 0)
     closeCorner.Parent = CloseButton
     
     local closeStroke = Instance.new("UIStroke")
-    closeStroke.Color = Color3.fromRGB(100, 100, 255)
-    closeStroke.Transparency = 0.3
-    closeStroke.Thickness = 2
+    closeStroke.Color = Color3.fromRGB(255, 255, 255)
+    closeStroke.Transparency = 0.8
+    closeStroke.Thickness = 1
     closeStroke.Parent = CloseButton
     
-    MainFrame.Size = UDim2.new(0.25, 0, 0.5, 0)
+    MainFrame.Size = UDim2.new(0.25, 0, 0.6, 0)
     MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
     MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-    MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-    MainFrame.BackgroundTransparency = 0.1
+    MainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    MainFrame.BackgroundTransparency = 0.5
     MainFrame.BorderSizePixel = 0
     MainFrame.ClipsDescendants = true
     MainFrame.Visible = true
     MainFrame.ZIndex = 1
     MainFrame.Parent = ScreenGui
     
-    local mainFrameCorner = Instance.new("UICorner")
-    mainFrameCorner.CornerRadius = UDim.new(0.03, 0)
-    mainFrameCorner.Parent = MainFrame
+    local uiStroke = Instance.new("UIStroke")
+    uiStroke.Color = Color3.fromRGB(255, 255, 255)
+    uiStroke.Thickness = 2
+    uiStroke.Transparency = 0.5
+    uiStroke.Parent = MainFrame
     
-    local mainFrameStroke = Instance.new("UIStroke")
-    mainFrameStroke.Color = Color3.fromRGB(100, 100, 255)
-    mainFrameStroke.Transparency = 0.3
-    mainFrameStroke.Thickness = 2
-    mainFrameStroke.Parent = MainFrame
+    ImageLabel.Size = UDim2.new(1, 0, 0.6, 0)
+    ImageLabel.Position = UDim2.new(0, 0, 0, 0)
+    ImageLabel.BackgroundTransparency = 1
+    ImageLabel.Image = "rbxassetid://83971645462159"
+    ImageLabel.ScaleType = Enum.ScaleType.Fit
+    ImageLabel.ZIndex = 2
+    ImageLabel.Parent = MainFrame
     
     HeaderLabel.Size = UDim2.new(1, 0, 0.1, 0)
     HeaderLabel.Position = UDim2.new(0, 0, 0, 0)
@@ -303,19 +314,24 @@ createGui = function()
     HeaderLabel.ZIndex = 3
     HeaderLabel.Parent = MainFrame
     
-    ButtonContainer.Size = UDim2.new(0.9, 0, 0.85, 0)
-    ButtonContainer.Position = UDim2.new(0.5, 0, 0.55, 0)
-    ButtonContainer.AnchorPoint = Vector2.new(0.5, 0.5)
+    ButtonContainer.Size = UDim2.new(1, 0, 0.45, 0)
+    ButtonContainer.Position = UDim2.new(0, 0, 1, 0)
+    ButtonContainer.AnchorPoint = Vector2.new(0, 1)
     ButtonContainer.BackgroundTransparency = 1
     ButtonContainer.Parent = MainFrame
     
+    local mainFrameCorner = Instance.new("UICorner")
+    mainFrameCorner.CornerRadius = UDim.new(0.05, 0)
+    mainFrameCorner.Parent = MainFrame
+    
     local UIGridLayout = Instance.new("UIGridLayout")
     UIGridLayout.Parent = ButtonContainer
-    UIGridLayout.CellSize = UDim2.new(0.9, 0, 0.16, 0)
-    UIGridLayout.CellPadding = UDim2.new(0, 0, 0, 10)
+    UIGridLayout.CellSize = UDim2.new(0.48, -1, 0.18, 0)
+    UIGridLayout.CellPadding = UDim2.new(0, 2, 0, 2)
     UIGridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    UIGridLayout.FillDirectionMaxCells = 2
     UIGridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-    UIGridLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+    UIGridLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
     
     makeDraggable(CloseButton)
     makeDraggable(MainFrame)
@@ -326,48 +342,36 @@ createGui = function()
         local button = Instance.new("TextButton")
         button.Size = UDim2.new(1, 0, 1, 0)
         button.BackgroundTransparency = 0.1
-        button.BackgroundColor3 = Color3.fromRGB(45, 45, 65)
+        button.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
         button.Text = name
-        button.TextColor3 = Color3.fromRGB(255, 255, 255)
-        button.Font = Enum.Font.GothamBold
-        button.TextSize = 16
+        button.TextColor3 = Color3.fromRGB(0, 0, 0)
+        button.Font = Enum.Font.GothamBlack
+        button.TextSize = 14
         button.LayoutOrder = number
         button.Parent = ButtonContainer
         button.ZIndex = 2
         
         local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0.2, 0)
+        corner.CornerRadius = UDim.new(0.3, 0)
         corner.Parent = button
         
         local stroke = Instance.new("UIStroke")
-        stroke.Color = Color3.fromRGB(100, 100, 255)
-        stroke.Transparency = 0.7
-        stroke.Thickness = 2
+        stroke.Color = Color3.fromRGB(255, 255, 255)
+        stroke.Transparency = 0.9
+        stroke.Thickness = 1
         stroke.Parent = button
-        
-        local gradient = Instance.new("UIGradient")
-        gradient.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(45, 45, 65)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(35, 35, 55))
-        })
-        gradient.Rotation = 90
-        gradient.Parent = button
         
         local isEnabled = savedSettings[name] or false
         
         local function updateButtonAppearance()
             if isEnabled then
-                gradient.Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0, Color3.fromRGB(80, 80, 200)),
-                    ColorSequenceKeypoint.new(1, Color3.fromRGB(60, 60, 180))
-                })
-                stroke.Transparency = 0.3
-            else
-                gradient.Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0, Color3.fromRGB(45, 45, 65)),
-                    ColorSequenceKeypoint.new(1, Color3.fromRGB(35, 35, 55))
-                })
+                button.BackgroundColor3 = Color3.fromRGB(86, 71, 201)
+                button.TextColor3 = Color3.fromRGB(255, 255, 255)
                 stroke.Transparency = 0.7
+            else
+                button.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                button.TextColor3 = Color3.fromRGB(0, 0, 0)
+                stroke.Transparency = 0.9
             end
         end
         
@@ -401,8 +405,7 @@ createGui = function()
         if enabled then
             spawn(function()
                 while enabled do
-                    local mob = getClosestMob()
-                    attackEnemy(mob)
+                    attackEnemy()
                     task.wait(0.1)
                 end
             end)
@@ -411,7 +414,13 @@ createGui = function()
     
     createToggleButton(3, "Auto Ability", toggleAbility)
     
-    createToggleButton(4, "Weapon Equip", function(enabled)
+    createToggleButton(4, "No Fall Damage", function(enabled)
+        if enabled and not noFallConnection then
+            enableNoFall()
+        end
+    end)
+    
+    createToggleButton(5, "Weapon Equip", function(enabled)
         if enabled then
             equipWeapon()
         end
@@ -429,11 +438,11 @@ createGui = function()
 end
 
 createGui()
+enableNoFall()
 
 player.CharacterAdded:Connect(function(newCharacter)
     character = newCharacter
     humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-    humanoid = character:WaitForChild("Humanoid")
     
     if autoFarm then
         startOrbiting()
