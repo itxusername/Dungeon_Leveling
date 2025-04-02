@@ -1,22 +1,6 @@
--- Load required libraries with error handling
-local function safeLoadLibrary(url)
-    local success, result = pcall(function()
-        return loadstring(game:HttpGet(url))()
-    end)
-    
-    if not success then
-        warn("Failed to load library from: " .. url)
-        warn("Error: " .. tostring(result))
-        return nil
-    end
-    
-    return result
-end
-
--- Safely load libraries
-local Fluent = safeLoadLibrary("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua")
-local SaveManager = safeLoadLibrary("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua")
-local InterfaceManager = safeLoadLibrary("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua")
+local Library = loadstring(game:HttpGetAsync("https://github.com/ActualMasterOogway/Fluent-Renewed/releases/latest/download/Fluent.luau"))()
+local SaveManager = loadstring(game:HttpGetAsync("https://raw.githubusercontent.com/ActualMasterOogway/Fluent-Renewed/master/Addons/SaveManager.luau"))()
+local InterfaceManager = loadstring(game:HttpGetAsync("https://raw.githubusercontent.com/ActualMasterOogway/Fluent-Renewed/master/Addons/InterfaceManager.luau"))()
 
 -- Check if libraries loaded successfully
 if not Fluent then
