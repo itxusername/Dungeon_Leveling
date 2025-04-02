@@ -1,86 +1,59 @@
+-- Load required libraries
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
+
+-- Game services
 local player = game.Players.LocalPlayer
+local runService = game:GetService("RunService")
+local tweenService = game:GetService("TweenService")
+local userInput = game:GetService("UserInputService")
+local httpService = game:GetService("HttpService")
+
+-- Variables
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-local runService = game:GetService("RunService")
-local userInput = game:GetService("UserInputService")
-local tweenService = game:GetService("TweenService")
 
+-- Auto farm settings
 local autoFarm = false
+local autoAttack = false
+local abilityActive = false
+local weaponEquipped = false
 local HIT_RANGE = 10
 local orbitRadius = 10
 local orbitAngle = 0
 local heightOffset = 2.5
-local saveFilePath = "settings.txt"
+local attackDelay = 0.1
+local saveFileName = "AutoFarmSettings.json"
 
-local gui = nil
-local mainFrame = nil
-local closeButton = nil
+-- Create Fluent Window
+local Window = Fluent:CreateWindow({
+    Title = "Auto Farm Pro " .. Fluent.Version,
+    SubTitle = "Ultimate Farm Helper",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(600, 460),
+    Acrylic = true,
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.RightControl
+})
 
-local createGui
-local makeDraggable
-local loadSettings
-local saveSettings
+-- Create tabs
+local Tabs = {
+    Main = Window:AddTab({ Title = "Main", Icon = "sword" }),
+    Settings = Window:AddTab({ Title = "Settings", Icon = "settings" }),
+    About = Window:AddTab({ Title = "Info", Icon = "info" })
+}
 
-loadSettings = function()
-    local success, data = pcall(function()
-        return game:GetService("HttpService"):JSONDecode(readfile(saveFilePath))
-    end)
-    if success then
-        return data
-    else
-        return {}
-    end
-end
+-- Initialize Options
+local Options = Fluent.Options
 
-saveSettings = function(settings)
-    pcall(function()
-        writefile(saveFilePath, game:GetService("HttpService"):JSONEncode(settings))
-    end)
-end
-
-makeDraggable = function(object)
-    local UserInputService = game:GetService("UserInputService")
-    local dragging
-    local dragInput
-    local dragStart
-    local startPos
-
-    local function update(input)
-        local delta = input.Position - dragStart
-        object.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
-
-    object.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = object.Position
-
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
-            end)
-        end
-    end)
-
-    object.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-            dragInput = input
-        end
-    end)
-
-    UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
-            update(input)
-        end
-    end)
-end
-
+-- Core functions
 local function getClosestMob()
     local closestMob = nil
     local closestDistance = math.huge
-    for _, mob in ipairs(workspace.Characters:GetChildren()) do
+    
+    -- Search through all workspace children
+    for _, mob in ipairs(workspace:GetChildren()) do
         if mob:IsA("Model") and mob ~= character and mob:FindFirstChild("HumanoidRootPart") and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 then
             local dist = (mob.HumanoidRootPart.Position - humanoidRootPart.Position).Magnitude
             if dist < closestDistance then
@@ -89,13 +62,15 @@ local function getClosestMob()
             end
         end
     end
-    return closestMob
+    
+    return closestMob, closestDistance
 end
 
 local function isInRange(mob, range)
-    local mobRootPart = mob:FindFirstChild("HumanoidRootPart")
-    if not mobRootPart or not humanoidRootPart then return false end
-    return (mobRootPart.Position - humanoidRootPart.Position).Magnitude <= range
+    if not mob or not mob:FindFirstChild("HumanoidRootPart") or not humanoidRootPart then 
+        return false 
+    end
+    return (mob.HumanoidRootPart.Position - humanoidRootPart.Position).Magnitude <= range
 end
 
 local function equipWeapon()
@@ -103,6 +78,7 @@ local function equipWeapon()
         [1] = "Equip/UnEquip"
     }
     game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("WeaponsEvent"):FireServer(unpack(args))
+    weaponEquipped = true
 end
 
 local function useSkill(skillName)
@@ -119,73 +95,95 @@ local function useSkill(skillName)
     game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Skill"):FireServer(unpack(args))
 end
 
+-- Improved attack enemy function with multiple attack methods
 local function attackEnemy()
-    local mob = getClosestMob()
-    if mob and mob:FindFirstChild("HumanoidRootPart") then
-        local mobRoot = mob.HumanoidRootPart
-        
-        local lookAtPosition = mobRoot.Position
-        humanoidRootPart.CFrame = CFrame.lookAt(humanoidRootPart.Position, lookAtPosition)
-        
+    local mob, distance = getClosestMob()
+    if not mob or not mob:FindFirstChild("HumanoidRootPart") then return end
+    
+    -- Don't attack if too far away
+    if distance > HIT_RANGE * 1.5 then return end
+
+    -- Get target parts for better hit registration
+    local targetParts = {"HumanoidRootPart", "Torso", "UpperTorso", "Head", "LowerTorso"}
+    local targetPart = nil
+    
+    for _, partName in ipairs(targetParts) do
+        targetPart = mob:FindFirstChild(partName)
+        if targetPart then break end
+    end
+    
+    if not targetPart then return end
+    
+    -- Ensure weapon is equipped
+    if not weaponEquipped then
+        equipWeapon()
+    end
+    
+    -- Multiple attack methods to ensure compatibility with various games
+    
+    -- Method 1: Basic attack
+    pcall(function()
         game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Combat"):FireServer("Attack")
-        
-        local targetParts = {"HumanoidRootPart", "Torso", "UpperTorso", "Head"}
-        for _, partName in ipairs(targetParts) do
-            local targetPart = mob:FindFirstChild(partName)
-            if targetPart then
-                local args = {
-                    [1] = "Attack",
-                    [2] = mob,
-                    [3] = targetPart.Position
-                }
-                game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Combat"):FireServer(unpack(args))
-                break
-            end
-        end
-    end
+    end)
+    
+    -- Method 2: Specific target attack
+    pcall(function()
+        local args = {
+            [1] = "Attack",
+            [2] = mob,
+            [3] = targetPart.Position
+        }
+        game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Combat"):FireServer(unpack(args))
+    end)
+    
+    -- Method 3: Position-based attack
+    pcall(function()
+        local args = {
+            [1] = "Attack",
+            [2] = targetPart.Position
+        }
+        game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Combat"):FireServer(unpack(args))
+    end)
+    
+    -- Method 4: WeaponAttack event
+    pcall(function()
+        game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("WeaponAttack"):FireServer(mob)
+    end)
+    
+    -- Look at mob to improve attack reliability
+    humanoidRootPart.CFrame = CFrame.lookAt(humanoidRootPart.Position, targetPart.Position)
 end
 
-local function attackLoop()
-    while autoFarm do
-        local mob = getClosestMob()
-        if mob and mob:FindFirstChild("HumanoidRootPart") then
-            humanoidRootPart.Anchored = false
-            
-            orbitAngle = orbitAngle + 10
-            if orbitAngle >= 360 then orbitAngle = 0 end
-            
-            local angle = math.rad(orbitAngle)
-            local x = math.cos(angle) * orbitRadius
-            local z = math.sin(angle) * orbitRadius
-            
-            local mobPosition = mob.HumanoidRootPart.Position
-            local targetPosition = mobPosition + Vector3.new(x, heightOffset, z)
-            
-            local lookAtPosition = mobPosition
-            humanoidRootPart.CFrame = CFrame.new(targetPosition, lookAtPosition)
-            
-            humanoidRootPart.Anchored = true
-            
+-- Attack loop function
+local attackLoopRunning = false
+local function startAttackLoop()
+    if attackLoopRunning then return end
+    attackLoopRunning = true
+    
+    spawn(function()
+        while autoAttack or autoFarm do
             attackEnemy()
-            
-            useSkill("FlurryOfBlows")
-            useSkill("BloodyCut")
-            useSkill("Invisibility")
-            
-            task.wait(0.1)
-        else
-            task.wait(0.5)
+            task.wait(attackDelay)
+            if not (autoAttack or autoFarm) then break end
         end
-    end
+        attackLoopRunning = false
+    end)
 end
 
-local orbitConnection
+-- Orbit connection for moving around target
+local orbitConnection = nil
 local function startOrbiting()
     if orbitConnection then orbitConnection:Disconnect() end
     
     orbitConnection = runService.Heartbeat:Connect(function()
         local mob = getClosestMob()
         if mob and mob:FindFirstChild("HumanoidRootPart") and autoFarm then
+            if not autoAttack then
+                -- Start attacking when auto farm is enabled
+                autoAttack = true
+                startAttackLoop()
+            end
+            
             humanoidRootPart.Anchored = false
             
             orbitAngle = orbitAngle + 2.5
@@ -198,9 +196,8 @@ local function startOrbiting()
             local mobPosition = mob.HumanoidRootPart.Position
             local targetPosition = mobPosition + Vector3.new(x, heightOffset, z)
             
-            local lookAtPosition = mobPosition
-            humanoidRootPart.CFrame = CFrame.new(targetPosition, lookAtPosition)
-            
+            -- Look at the mob while orbiting to improve attack accuracy
+            humanoidRootPart.CFrame = CFrame.new(targetPosition, mobPosition)
             humanoidRootPart.Anchored = true
         end
     end)
@@ -208,19 +205,14 @@ end
 
 local function stopAutoFarm()
     autoFarm = false
+    if not autoAttack then
+        attackLoopRunning = false
+    end
     humanoidRootPart.Anchored = false
     if orbitConnection then orbitConnection:Disconnect() end
 end
 
-local function enableNoFall()
-    runService.Stepped:Connect(function()
-        if autoFarm and humanoidRootPart then
-            humanoidRootPart.Velocity = Vector3.new(0, 0, 0)
-        end
-    end)
-end
-
-local abilityActive = false
+-- Ability loop
 local abilityLoop = nil
 local function toggleAbility(isEnabled)
     abilityActive = isEnabled
@@ -229,9 +221,11 @@ local function toggleAbility(isEnabled)
             abilityLoop = spawn(function()
                 while abilityActive do
                     useSkill("FlurryOfBlows")
+                    task.wait(0.3)
                     useSkill("BloodyCut")
+                    task.wait(0.3)
                     useSkill("Invisibility")
-                    task.wait(1)
+                    task.wait(0.4)
                 end
             end)
         end
@@ -241,211 +235,301 @@ local function toggleAbility(isEnabled)
     end
 end
 
-createGui = function()
-    if gui then 
-        gui:Destroy() 
-    end
+-- Save/Load Settings
+local function saveSettings()
+    local settings = {
+        autoFarm = autoFarm,
+        autoAttack = autoAttack,
+        abilityActive = abilityActive,
+        orbitRadius = orbitRadius,
+        heightOffset = heightOffset,
+        attackDelay = attackDelay,
+        HIT_RANGE = HIT_RANGE
+    }
     
-    local ScreenGui = Instance.new("ScreenGui")
-    local MainFrame = Instance.new("Frame")
-    local ImageLabel = Instance.new("ImageLabel")
-    local CloseButton = Instance.new("TextButton")
-    local ButtonContainer = Instance.new("Frame")
-    local HeaderLabel = Instance.new("TextLabel")
-    
-    ScreenGui.Name = "AutoFarmGUI"
-    ScreenGui.ResetOnSpawn = false
-    ScreenGui.DisplayOrder = 999999999
-    ScreenGui.Parent = game.Players.LocalPlayer.PlayerGui
-    
-    CloseButton.Size = UDim2.new(0, 150, 0, 45)
-    CloseButton.Position = UDim2.new(0.5, -75, 0, -40)
-    CloseButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    CloseButton.BackgroundTransparency = 0.3
-    CloseButton.Text = "Open/Close"
-    CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    CloseButton.Font = Enum.Font.GothamBlack
-    CloseButton.TextSize = 16
-    CloseButton.Parent = ScreenGui
-    CloseButton.ZIndex = 10
-    
-    local closeCorner = Instance.new("UICorner")
-    closeCorner.CornerRadius = UDim.new(0.3, 0)
-    closeCorner.Parent = CloseButton
-    
-    local closeStroke = Instance.new("UIStroke")
-    closeStroke.Color = Color3.fromRGB(255, 255, 255)
-    closeStroke.Transparency = 0.8
-    closeStroke.Thickness = 1
-    closeStroke.Parent = CloseButton
-    
-    MainFrame.Size = UDim2.new(0.25, 0, 0.6, 0)
-    MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-    MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-    MainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    MainFrame.BackgroundTransparency = 0.5
-    MainFrame.BorderSizePixel = 0
-    MainFrame.ClipsDescendants = true
-    MainFrame.Visible = true
-    MainFrame.ZIndex = 1
-    MainFrame.Parent = ScreenGui
-    
-    local uiStroke = Instance.new("UIStroke")
-    uiStroke.Color = Color3.fromRGB(255, 255, 255)
-    uiStroke.Thickness = 2
-    uiStroke.Transparency = 0.5
-    uiStroke.Parent = MainFrame
-    
-    ImageLabel.Size = UDim2.new(1, 0, 0.6, 0)
-    ImageLabel.Position = UDim2.new(0, 0, 0, 0)
-    ImageLabel.BackgroundTransparency = 1
-    ImageLabel.Image = "rbxassetid://83971645462159"
-    ImageLabel.ScaleType = Enum.ScaleType.Fit
-    ImageLabel.ZIndex = 2
-    ImageLabel.Parent = MainFrame
-    
-    HeaderLabel.Size = UDim2.new(1, 0, 0.1, 0)
-    HeaderLabel.Position = UDim2.new(0, 0, 0, 0)
-    HeaderLabel.BackgroundTransparency = 1
-    HeaderLabel.Text = "Auto Farm Script"
-    HeaderLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    HeaderLabel.Font = Enum.Font.GothamBold
-    HeaderLabel.TextSize = 24
-    HeaderLabel.ZIndex = 3
-    HeaderLabel.Parent = MainFrame
-    
-    ButtonContainer.Size = UDim2.new(1, 0, 0.45, 0)
-    ButtonContainer.Position = UDim2.new(0, 0, 1, 0)
-    ButtonContainer.AnchorPoint = Vector2.new(0, 1)
-    ButtonContainer.BackgroundTransparency = 1
-    ButtonContainer.Parent = MainFrame
-    
-    local mainFrameCorner = Instance.new("UICorner")
-    mainFrameCorner.CornerRadius = UDim.new(0.05, 0)
-    mainFrameCorner.Parent = MainFrame
-    
-    local UIGridLayout = Instance.new("UIGridLayout")
-    UIGridLayout.Parent = ButtonContainer
-    UIGridLayout.CellSize = UDim2.new(0.48, -1, 0.18, 0)
-    UIGridLayout.CellPadding = UDim2.new(0, 2, 0, 2)
-    UIGridLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    UIGridLayout.FillDirectionMaxCells = 2
-    UIGridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-    UIGridLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
-    
-    makeDraggable(CloseButton)
-    makeDraggable(MainFrame)
-    
-    local savedSettings = loadSettings()
-    
-    local function createToggleButton(number, name, onClick)
-        local button = Instance.new("TextButton")
-        button.Size = UDim2.new(1, 0, 1, 0)
-        button.BackgroundTransparency = 0.1
-        button.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-        button.Text = name
-        button.TextColor3 = Color3.fromRGB(0, 0, 0)
-        button.Font = Enum.Font.GothamBlack
-        button.TextSize = 14
-        button.LayoutOrder = number
-        button.Parent = ButtonContainer
-        button.ZIndex = 2
-        
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0.3, 0)
-        corner.Parent = button
-        
-        local stroke = Instance.new("UIStroke")
-        stroke.Color = Color3.fromRGB(255, 255, 255)
-        stroke.Transparency = 0.9
-        stroke.Thickness = 1
-        stroke.Parent = button
-        
-        local isEnabled = savedSettings[name] or false
-        
-        local function updateButtonAppearance()
-            if isEnabled then
-                button.BackgroundColor3 = Color3.fromRGB(86, 71, 201)
-                button.TextColor3 = Color3.fromRGB(255, 255, 255)
-                stroke.Transparency = 0.7
-            else
-                button.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-                button.TextColor3 = Color3.fromRGB(0, 0, 0)
-                stroke.Transparency = 0.9
-            end
-        end
-        
-        updateButtonAppearance()
-        
-        if isEnabled then
-            onClick(true)
-        end
-        
-        button.MouseButton1Click:Connect(function()
-            isEnabled = not isEnabled
-            updateButtonAppearance()
-            onClick(isEnabled)
-            savedSettings[name] = isEnabled
-            saveSettings(savedSettings)
-        end)
-    end
-    
-    createToggleButton(1, "Auto Farm", function(enabled) 
-        autoFarm = enabled
-        if enabled then
-            equipWeapon()
-            startOrbiting()
-            spawn(attackLoop)
-        else
-            stopAutoFarm()
-        end
+    pcall(function()
+        writefile(saveFileName, httpService:JSONEncode(settings))
     end)
-    
-    createToggleButton(2, "Auto Attack", function(enabled) 
-        if enabled then
-            spawn(function()
-                while enabled do
-                    attackEnemy()
-                    task.wait(0.1)
-                end
-            end)
-        end
-    end)
-    
-    createToggleButton(3, "Auto Ability", toggleAbility)
-    
-    createToggleButton(4, "No Fall Damage", function(enabled)
-        if enabled and not noFallConnection then
-            enableNoFall()
-        end
-    end)
-    
-    createToggleButton(5, "Weapon Equip", function(enabled)
-        if enabled then
-            equipWeapon()
-        end
-    end)
-    
-    CloseButton.MouseButton1Click:Connect(function()
-        MainFrame.Visible = not MainFrame.Visible
-    end)
-    
-    gui = ScreenGui
-    mainFrame = MainFrame
-    closeButton = CloseButton
-    
-    return ScreenGui, MainFrame, CloseButton
 end
 
-createGui()
-enableNoFall()
+local function loadSettings()
+    local success, settings = pcall(function()
+        if isfile(saveFileName) then
+            return httpService:JSONDecode(readfile(saveFileName))
+        end
+        return nil
+    end)
+    
+    if success and settings then
+        autoFarm = settings.autoFarm or false
+        autoAttack = settings.autoAttack or false
+        abilityActive = settings.abilityActive or false
+        orbitRadius = settings.orbitRadius or 10
+        heightOffset = settings.heightOffset or 2.5
+        attackDelay = settings.attackDelay or 0.1
+        HIT_RANGE = settings.HIT_RANGE or 10
+        
+        return true
+    end
+    return false
+end
 
+-- Initialize settings
+pcall(loadSettings)
+
+-- UI Components
+-- Main Tab
+Tabs.Main:AddParagraph({
+    Title = "Welcome to Auto Farm Pro",
+    Content = "The ultimate farming solution. Toggle features below to begin."
+})
+
+local AutoFarmToggle = Tabs.Main:AddToggle("AutoFarm", {
+    Title = "Auto Farm",
+    Description = "Automatically orbit and attack nearby enemies",
+    Default = autoFarm
+})
+
+AutoFarmToggle:OnChanged(function(Value)
+    autoFarm = Value
+    if Value then
+        if not weaponEquipped then
+            equipWeapon()
+        end
+        startOrbiting()
+        -- Auto-enable attack when farm is enabled
+        Options.AutoAttack:SetValue(true)
+    else
+        stopAutoFarm()
+    end
+    saveSettings()
+end)
+
+local AutoAttackToggle = Tabs.Main:AddToggle("AutoAttack", {
+    Title = "Auto Attack",
+    Description = "Automatically attack without orbiting",
+    Default = autoAttack
+})
+
+AutoAttackToggle:OnChanged(function(Value)
+    autoAttack = Value
+    if Value then
+        if not weaponEquipped then
+            equipWeapon()
+        end
+        startAttackLoop()
+    end
+    saveSettings()
+})
+
+local AbilityToggle = Tabs.Main:AddToggle("AutoAbility", {
+    Title = "Auto Ability",
+    Description = "Automatically use abilities",
+    Default = abilityActive
+})
+
+AbilityToggle:OnChanged(function(Value)
+    toggleAbility(Value)
+    saveSettings()
+})
+
+local EquipButton = Tabs.Main:AddButton({
+    Title = "Equip Weapon",
+    Description = "Manually equip your weapon",
+    Callback = function()
+        equipWeapon()
+        Fluent:Notify({
+            Title = "Weapon",
+            Content = "Weapon equipped successfully",
+            Duration = 3
+        })
+    end
+})
+
+Tabs.Main:AddButton({
+    Title = "Find Closest Mob",
+    Description = "Locate and display the closest mob",
+    Callback = function()
+        local mob, distance = getClosestMob()
+        if mob then
+            Fluent:Notify({
+                Title = "Found Mob",
+                Content = "Closest mob: " .. (mob.Name or "Unknown") .. " (Distance: " .. math.floor(distance) .. ")",
+                Duration = 3
+            })
+        else
+            Fluent:Notify({
+                Title = "No Mobs Found",
+                Content = "Could not find any mobs nearby",
+                Duration = 3
+            })
+        end
+    end
+})
+
+-- Settings Tab
+local RadiusSlider = Tabs.Settings:AddSlider("OrbitRadius", {
+    Title = "Orbit Radius",
+    Description = "Distance to orbit around mobs",
+    Default = orbitRadius,
+    Min = 5,
+    Max = 20,
+    Rounding = 1,
+    Callback = function(Value)
+        orbitRadius = Value
+        saveSettings()
+    end
+})
+
+local HeightSlider = Tabs.Settings:AddSlider("HeightOffset", {
+    Title = "Height Offset",
+    Description = "Height above mob",
+    Default = heightOffset,
+    Min = 0,
+    Max = 10,
+    Rounding = 0.5,
+    Callback = function(Value)
+        heightOffset = Value
+        saveSettings()
+    end
+})
+
+local AttackDelaySlider = Tabs.Settings:AddSlider("AttackDelay", {
+    Title = "Attack Delay",
+    Description = "Delay between attacks",
+    Default = attackDelay,
+    Min = 0.05,
+    Max = 1,
+    Rounding = 0.05,
+    Callback = function(Value)
+        attackDelay = Value
+        saveSettings()
+    end
+})
+
+local HitRangeSlider = Tabs.Settings:AddSlider("HitRange", {
+    Title = "Hit Range",
+    Description = "Maximum attack range",
+    Default = HIT_RANGE,
+    Min = 5,
+    Max = 20,
+    Rounding = 1,
+    Callback = function(Value)
+        HIT_RANGE = Value
+        saveSettings()
+    end
+})
+
+Tabs.Settings:AddButton({
+    Title = "Save Settings",
+    Description = "Save current configuration",
+    Callback = function()
+        saveSettings()
+        Fluent:Notify({
+            Title = "Settings Saved",
+            Content = "Your settings have been saved successfully",
+            Duration = 3
+        })
+    end
+})
+
+Tabs.Settings:AddButton({
+    Title = "Load Settings",
+    Description = "Load saved configuration",
+    Callback = function()
+        if loadSettings() then
+            -- Update UI elements
+            Options.AutoFarm:SetValue(autoFarm)
+            Options.AutoAttack:SetValue(autoAttack)
+            Options.AutoAbility:SetValue(abilityActive)
+            Options.OrbitRadius:SetValue(orbitRadius)
+            Options.HeightOffset:SetValue(heightOffset)
+            Options.AttackDelay:SetValue(attackDelay)
+            Options.HitRange:SetValue(HIT_RANGE)
+            
+            Fluent:Notify({
+                Title = "Settings Loaded",
+                Content = "Your settings have been loaded successfully",
+                Duration = 3
+            })
+        else
+            Fluent:Notify({
+                Title = "Load Failed",
+                Content = "No saved settings found or error loading",
+                Duration = 3
+            })
+        end
+    end
+})
+
+-- About Tab
+Tabs.About:AddParagraph({
+    Title = "Auto Farm Pro",
+    Content = "Version 2.0\nA professional auto farming solution.\n\nFeatures include automatic orbiting, attacking, ability usage, and customizable settings."
+})
+
+Tabs.About:AddParagraph({
+    Title = "How to Use",
+    Content = "1. Enable Auto Farm to automatically orbit and attack nearby mobs\n2. Use Settings to customize orbit distance, height, and attack delay\n3. Toggle Auto Ability to use skills automatically"
+})
+
+-- Integrate SaveManager and InterfaceManager
+SaveManager:SetLibrary(Fluent)
+InterfaceManager:SetLibrary(Fluent)
+
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({"AutoFarm", "AutoAttack", "AutoAbility"})
+
+InterfaceManager:SetFolder("AutoFarmPro")
+SaveManager:SetFolder("AutoFarmPro/ConfigUI")
+
+InterfaceManager:BuildInterfaceSection(Tabs.Settings)
+SaveManager:BuildConfigSection(Tabs.Settings)
+
+-- Final setup
+Window:SelectTab(1)
+
+-- Load auto-load config if available
+SaveManager:LoadAutoloadConfig()
+
+Fluent:Notify({
+    Title = "Auto Farm Pro",
+    Content = "Script loaded successfully!",
+    Duration = 5
+})
+
+-- Handle character respawn
 player.CharacterAdded:Connect(function(newCharacter)
     character = newCharacter
     humanoidRootPart = character:WaitForChild("HumanoidRootPart")
     
+    -- Re-enable features if they were active
     if autoFarm then
+        weaponEquipped = false
+        task.wait(1)
+        equipWeapon()
         startOrbiting()
-        spawn(attackLoop)
+    elseif autoAttack then
+        weaponEquipped = false
+        task.wait(1)
+        equipWeapon()
+        startAttackLoop()
     end
-end)
+    
+    if abilityActive then
+        toggleAbility(true)
+    end
+})
+
+-- Apply settings immediately if enabled
+if autoFarm then
+    equipWeapon()
+    startOrbiting()
+elseif autoAttack then
+    equipWeapon()
+    startAttackLoop()
+end
+
+if abilityActive then
+    toggleAbility(true)
+end
