@@ -1,7 +1,28 @@
--- Load required libraries
-local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
-local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
-local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
+-- Load required libraries with error handling
+local function safeLoadLibrary(url)
+    local success, result = pcall(function()
+        return loadstring(game:HttpGet(url))()
+    end)
+    
+    if not success then
+        warn("Failed to load library from: " .. url)
+        warn("Error: " .. tostring(result))
+        return nil
+    end
+    
+    return result
+end
+
+-- Safely load libraries
+local Fluent = safeLoadLibrary("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua")
+local SaveManager = safeLoadLibrary("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua")
+local InterfaceManager = safeLoadLibrary("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua")
+
+-- Check if libraries loaded successfully
+if not Fluent or not SaveManager or not InterfaceManager then
+    warn("Critical libraries failed to load. Script cannot continue.")
+    return
+end
 
 -- Game services
 local player = game.Players.LocalPlayer
@@ -10,9 +31,18 @@ local tweenService = game:GetService("TweenService")
 local userInput = game:GetService("UserInputService")
 local httpService = game:GetService("HttpService")
 
--- Variables
+-- Variables with safety checks
 local character = player.Character or player.CharacterAdded:Wait()
-local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+
+-- Wait for HumanoidRootPart if not found
+if not humanoidRootPart then
+    humanoidRootPart = character:WaitForChild("HumanoidRootPart", 5)
+    if not humanoidRootPart then
+        warn("HumanoidRootPart not found. Make sure your character has loaded properly.")
+        return
+    end
+end
 
 -- Auto farm settings
 local autoFarm = false
@@ -26,16 +56,24 @@ local heightOffset = 2.5
 local attackDelay = 0.1
 local saveFileName = "AutoFarmSettings.json"
 
--- Create Fluent Window
-local Window = Fluent:CreateWindow({
-    Title = "Auto Farm Pro " .. Fluent.Version,
-    SubTitle = "Ultimate Farm Helper",
-    TabWidth = 160,
-    Size = UDim2.fromOffset(600, 460),
-    Acrylic = true,
-    Theme = "Dark",
-    MinimizeKey = Enum.KeyCode.RightControl
-})
+-- Create Fluent Window with error handling
+local Window
+pcall(function()
+    Window = Fluent:CreateWindow({
+        Title = "Auto Farm Pro " .. (Fluent.Version or ""),
+        SubTitle = "Ultimate Farm Helper",
+        TabWidth = 160,
+        Size = UDim2.fromOffset(600, 460),
+        Acrylic = true,
+        Theme = "Dark",
+        MinimizeKey = Enum.KeyCode.RightControl
+    })
+end)
+
+if not Window then
+    warn("Failed to create window. Fluent library might not be loaded correctly.")
+    return
+end
 
 -- Create tabs
 local Tabs = {
@@ -44,8 +82,8 @@ local Tabs = {
     About = Window:AddTab({ Title = "Info", Icon = "info" })
 }
 
--- Initialize Options
-local Options = Fluent.Options
+-- Initialize Options with safety check
+local Options = Fluent.Options or {}
 
 -- Core functions
 local function getClosestMob()
@@ -74,11 +112,13 @@ local function isInRange(mob, range)
 end
 
 local function equipWeapon()
-    local args = {
-        [1] = "Equip/UnEquip"
-    }
-    game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("WeaponsEvent"):FireServer(unpack(args))
-    weaponEquipped = true
+    pcall(function()
+        local args = {
+            [1] = "Equip/UnEquip"
+        }
+        game:GetService("ReplicatedStorage"):WaitForChild("Events", 3):WaitForChild("WeaponsEvent", 3):FireServer(unpack(args))
+        weaponEquipped = true
+    end)
 end
 
 local function useSkill(skillName)
@@ -87,15 +127,17 @@ local function useSkill(skillName)
     
     local targetPosition = mob.HumanoidRootPart.Position
     
-    local args = {
-        [1] = { ["Skill"] = skillName, ["Function"] = "Activate" },
-        [2] = targetPosition,
-        [3] = true
-    }
-    game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Skill"):FireServer(unpack(args))
+    pcall(function()
+        local args = {
+            [1] = { ["Skill"] = skillName, ["Function"] = "Activate" },
+            [2] = targetPosition,
+            [3] = true
+        }
+        game:GetService("ReplicatedStorage"):WaitForChild("Events", 3):WaitForChild("Skill", 3):FireServer(unpack(args))
+    end)
 end
 
--- Improved attack enemy function with multiple attack methods
+-- Improved attack enemy function with multiple attack methods and error handling
 local function attackEnemy()
     local mob, distance = getClosestMob()
     if not mob or not mob:FindFirstChild("HumanoidRootPart") then return end
@@ -123,31 +165,43 @@ local function attackEnemy()
     
     -- Method 1: Basic attack
     pcall(function()
-        game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Combat"):FireServer("Attack")
+        local events = game:GetService("ReplicatedStorage"):FindFirstChild("Events")
+        if events and events:FindFirstChild("Combat") then
+            events.Combat:FireServer("Attack")
+        end
     end)
     
     -- Method 2: Specific target attack
     pcall(function()
-        local args = {
-            [1] = "Attack",
-            [2] = mob,
-            [3] = targetPart.Position
-        }
-        game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Combat"):FireServer(unpack(args))
+        local events = game:GetService("ReplicatedStorage"):FindFirstChild("Events")
+        if events and events:FindFirstChild("Combat") then
+            local args = {
+                [1] = "Attack",
+                [2] = mob,
+                [3] = targetPart.Position
+            }
+            events.Combat:FireServer(unpack(args))
+        end
     end)
     
     -- Method 3: Position-based attack
     pcall(function()
-        local args = {
-            [1] = "Attack",
-            [2] = targetPart.Position
-        }
-        game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("Combat"):FireServer(unpack(args))
+        local events = game:GetService("ReplicatedStorage"):FindFirstChild("Events")
+        if events and events:FindFirstChild("Combat") then
+            local args = {
+                [1] = "Attack",
+                [2] = targetPart.Position
+            }
+            events.Combat:FireServer(unpack(args))
+        end
     end)
     
     -- Method 4: WeaponAttack event
     pcall(function()
-        game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("WeaponAttack"):FireServer(mob)
+        local events = game:GetService("ReplicatedStorage"):FindFirstChild("Events")
+        if events and events:FindFirstChild("WeaponAttack") then
+            events.WeaponAttack:FireServer(mob)
+        end
     end)
     
     -- Look at mob to improve attack reliability
@@ -177,28 +231,30 @@ local function startOrbiting()
     
     orbitConnection = runService.Heartbeat:Connect(function()
         local mob = getClosestMob()
-        if mob and mob:FindFirstChild("HumanoidRootPart") and autoFarm then
+        if mob and mob:FindFirstChild("HumanoidRootPart") and autoFarm and humanoidRootPart then
             if not autoAttack then
                 -- Start attacking when auto farm is enabled
                 autoAttack = true
                 startAttackLoop()
             end
             
-            humanoidRootPart.Anchored = false
-            
-            orbitAngle = orbitAngle + 2.5
-            if orbitAngle >= 360 then orbitAngle = 0 end
-            
-            local angle = math.rad(orbitAngle)
-            local x = math.cos(angle) * orbitRadius
-            local z = math.sin(angle) * orbitRadius
-            
-            local mobPosition = mob.HumanoidRootPart.Position
-            local targetPosition = mobPosition + Vector3.new(x, heightOffset, z)
-            
-            -- Look at the mob while orbiting to improve attack accuracy
-            humanoidRootPart.CFrame = CFrame.new(targetPosition, mobPosition)
-            humanoidRootPart.Anchored = true
+            pcall(function()
+                humanoidRootPart.Anchored = false
+                
+                orbitAngle = orbitAngle + 2.5
+                if orbitAngle >= 360 then orbitAngle = 0 end
+                
+                local angle = math.rad(orbitAngle)
+                local x = math.cos(angle) * orbitRadius
+                local z = math.sin(angle) * orbitRadius
+                
+                local mobPosition = mob.HumanoidRootPart.Position
+                local targetPosition = mobPosition + Vector3.new(x, heightOffset, z)
+                
+                -- Look at the mob while orbiting to improve attack accuracy
+                humanoidRootPart.CFrame = CFrame.new(targetPosition, mobPosition)
+                humanoidRootPart.Anchored = true
+            end)
         end
     end)
 end
@@ -208,7 +264,9 @@ local function stopAutoFarm()
     if not autoAttack then
         attackLoopRunning = false
     end
-    humanoidRootPart.Anchored = false
+    if humanoidRootPart then
+        pcall(function() humanoidRootPart.Anchored = false end)
+    end
     if orbitConnection then orbitConnection:Disconnect() end
 end
 
@@ -235,7 +293,7 @@ local function toggleAbility(isEnabled)
     end
 end
 
--- Save/Load Settings
+-- Save/Load Settings with error handling
 local function saveSettings()
     local settings = {
         autoFarm = autoFarm,
@@ -254,7 +312,7 @@ end
 
 local function loadSettings()
     local success, settings = pcall(function()
-        if isfile(saveFileName) then
+        if isfile and isfile(saveFileName) then
             return httpService:JSONDecode(readfile(saveFileName))
         end
         return nil
@@ -277,259 +335,295 @@ end
 -- Initialize settings
 pcall(loadSettings)
 
--- UI Components
+-- UI Components with error handling
 -- Main Tab
-Tabs.Main:AddParagraph({
-    Title = "Welcome to Auto Farm Pro",
-    Content = "The ultimate farming solution. Toggle features below to begin."
-})
+pcall(function()
+    Tabs.Main:AddParagraph({
+        Title = "Welcome to Auto Farm Pro",
+        Content = "The ultimate farming solution. Toggle features below to begin."
+    })
 
-local AutoFarmToggle = Tabs.Main:AddToggle("AutoFarm", {
-    Title = "Auto Farm",
-    Description = "Automatically orbit and attack nearby enemies",
-    Default = autoFarm
-})
+    local AutoFarmToggle = Tabs.Main:AddToggle("AutoFarm", {
+        Title = "Auto Farm",
+        Description = "Automatically orbit and attack nearby enemies",
+        Default = autoFarm
+    })
 
-AutoFarmToggle:OnChanged(function(Value)
-    autoFarm = Value
-    if Value then
-        if not weaponEquipped then
-            equipWeapon()
-        end
-        startOrbiting()
-        -- Auto-enable attack when farm is enabled
-        Options.AutoAttack:SetValue(true)
-    else
-        stopAutoFarm()
+    if AutoFarmToggle then
+        AutoFarmToggle:OnChanged(function(Value)
+            autoFarm = Value
+            if Value then
+                if not weaponEquipped then
+                    equipWeapon()
+                end
+                startOrbiting()
+                -- Auto-enable attack when farm is enabled
+                if Options.AutoAttack and Options.AutoAttack.SetValue then
+                    Options.AutoAttack:SetValue(true)
+                end
+            else
+                stopAutoFarm()
+            end
+            saveSettings()
+        end)
     end
-    saveSettings()
+
+    local AutoAttackToggle = Tabs.Main:AddToggle("AutoAttack", {
+        Title = "Auto Attack",
+        Description = "Automatically attack without orbiting",
+        Default = autoAttack
+    })
+
+    if AutoAttackToggle then
+        AutoAttackToggle:OnChanged(function(Value)
+            autoAttack = Value
+            if Value then
+                if not weaponEquipped then
+                    equipWeapon()
+                end
+                startAttackLoop()
+            end
+            saveSettings()
+        end)
+    end
+
+    local AbilityToggle = Tabs.Main:AddToggle("AutoAbility", {
+        Title = "Auto Ability",
+        Description = "Automatically use abilities",
+        Default = abilityActive
+    })
+
+    if AbilityToggle then
+        AbilityToggle:OnChanged(function(Value)
+            toggleAbility(Value)
+            saveSettings()
+        end)
+    end
+
+    Tabs.Main:AddButton({
+        Title = "Equip Weapon",
+        Description = "Manually equip your weapon",
+        Callback = function()
+            equipWeapon()
+            if Fluent and Fluent.Notify then
+                Fluent:Notify({
+                    Title = "Weapon",
+                    Content = "Weapon equipped successfully",
+                    Duration = 3
+                })
+            end
+        end
+    })
+
+    Tabs.Main:AddButton({
+        Title = "Find Closest Mob",
+        Description = "Locate and display the closest mob",
+        Callback = function()
+            local mob, distance = getClosestMob()
+            if Fluent and Fluent.Notify then
+                if mob then
+                    Fluent:Notify({
+                        Title = "Found Mob",
+                        Content = "Closest mob: " .. (mob.Name or "Unknown") .. " (Distance: " .. math.floor(distance) .. ")",
+                        Duration = 3
+                    })
+                else
+                    Fluent:Notify({
+                        Title = "No Mobs Found",
+                        Content = "Could not find any mobs nearby",
+                        Duration = 3
+                    })
+                end
+            end
+        end
+    })
 end)
 
-local AutoAttackToggle = Tabs.Main:AddToggle("AutoAttack", {
-    Title = "Auto Attack",
-    Description = "Automatically attack without orbiting",
-    Default = autoAttack
-})
-
-AutoAttackToggle:OnChanged(function(Value)
-    autoAttack = Value
-    if Value then
-        if not weaponEquipped then
-            equipWeapon()
-        end
-        startAttackLoop()
-    end
-    saveSettings()
-})
-
-local AbilityToggle = Tabs.Main:AddToggle("AutoAbility", {
-    Title = "Auto Ability",
-    Description = "Automatically use abilities",
-    Default = abilityActive
-})
-
-AbilityToggle:OnChanged(function(Value)
-    toggleAbility(Value)
-    saveSettings()
-})
-
-local EquipButton = Tabs.Main:AddButton({
-    Title = "Equip Weapon",
-    Description = "Manually equip your weapon",
-    Callback = function()
-        equipWeapon()
-        Fluent:Notify({
-            Title = "Weapon",
-            Content = "Weapon equipped successfully",
-            Duration = 3
-        })
-    end
-})
-
-Tabs.Main:AddButton({
-    Title = "Find Closest Mob",
-    Description = "Locate and display the closest mob",
-    Callback = function()
-        local mob, distance = getClosestMob()
-        if mob then
-            Fluent:Notify({
-                Title = "Found Mob",
-                Content = "Closest mob: " .. (mob.Name or "Unknown") .. " (Distance: " .. math.floor(distance) .. ")",
-                Duration = 3
-            })
-        else
-            Fluent:Notify({
-                Title = "No Mobs Found",
-                Content = "Could not find any mobs nearby",
-                Duration = 3
-            })
-        end
-    end
-})
-
 -- Settings Tab
-local RadiusSlider = Tabs.Settings:AddSlider("OrbitRadius", {
-    Title = "Orbit Radius",
-    Description = "Distance to orbit around mobs",
-    Default = orbitRadius,
-    Min = 5,
-    Max = 20,
-    Rounding = 1,
-    Callback = function(Value)
-        orbitRadius = Value
-        saveSettings()
-    end
-})
-
-local HeightSlider = Tabs.Settings:AddSlider("HeightOffset", {
-    Title = "Height Offset",
-    Description = "Height above mob",
-    Default = heightOffset,
-    Min = 0,
-    Max = 10,
-    Rounding = 0.5,
-    Callback = function(Value)
-        heightOffset = Value
-        saveSettings()
-    end
-})
-
-local AttackDelaySlider = Tabs.Settings:AddSlider("AttackDelay", {
-    Title = "Attack Delay",
-    Description = "Delay between attacks",
-    Default = attackDelay,
-    Min = 0.05,
-    Max = 1,
-    Rounding = 0.05,
-    Callback = function(Value)
-        attackDelay = Value
-        saveSettings()
-    end
-})
-
-local HitRangeSlider = Tabs.Settings:AddSlider("HitRange", {
-    Title = "Hit Range",
-    Description = "Maximum attack range",
-    Default = HIT_RANGE,
-    Min = 5,
-    Max = 20,
-    Rounding = 1,
-    Callback = function(Value)
-        HIT_RANGE = Value
-        saveSettings()
-    end
-})
-
-Tabs.Settings:AddButton({
-    Title = "Save Settings",
-    Description = "Save current configuration",
-    Callback = function()
-        saveSettings()
-        Fluent:Notify({
-            Title = "Settings Saved",
-            Content = "Your settings have been saved successfully",
-            Duration = 3
-        })
-    end
-})
-
-Tabs.Settings:AddButton({
-    Title = "Load Settings",
-    Description = "Load saved configuration",
-    Callback = function()
-        if loadSettings() then
-            -- Update UI elements
-            Options.AutoFarm:SetValue(autoFarm)
-            Options.AutoAttack:SetValue(autoAttack)
-            Options.AutoAbility:SetValue(abilityActive)
-            Options.OrbitRadius:SetValue(orbitRadius)
-            Options.HeightOffset:SetValue(heightOffset)
-            Options.AttackDelay:SetValue(attackDelay)
-            Options.HitRange:SetValue(HIT_RANGE)
-            
-            Fluent:Notify({
-                Title = "Settings Loaded",
-                Content = "Your settings have been loaded successfully",
-                Duration = 3
-            })
-        else
-            Fluent:Notify({
-                Title = "Load Failed",
-                Content = "No saved settings found or error loading",
-                Duration = 3
-            })
+pcall(function()
+    local RadiusSlider = Tabs.Settings:AddSlider("OrbitRadius", {
+        Title = "Orbit Radius",
+        Description = "Distance to orbit around mobs",
+        Default = orbitRadius,
+        Min = 5,
+        Max = 20,
+        Rounding = 1,
+        Callback = function(Value)
+            orbitRadius = Value
+            saveSettings()
         end
-    end
-})
+    })
+
+    local HeightSlider = Tabs.Settings:AddSlider("HeightOffset", {
+        Title = "Height Offset",
+        Description = "Height above mob",
+        Default = heightOffset,
+        Min = 0,
+        Max = 10,
+        Rounding = 0.5,
+        Callback = function(Value)
+            heightOffset = Value
+            saveSettings()
+        end
+    })
+
+    local AttackDelaySlider = Tabs.Settings:AddSlider("AttackDelay", {
+        Title = "Attack Delay",
+        Description = "Delay between attacks",
+        Default = attackDelay,
+        Min = 0.05,
+        Max = 1,
+        Rounding = 0.05,
+        Callback = function(Value)
+            attackDelay = Value
+            saveSettings()
+        end
+    })
+
+    local HitRangeSlider = Tabs.Settings:AddSlider("HitRange", {
+        Title = "Hit Range",
+        Description = "Maximum attack range",
+        Default = HIT_RANGE,
+        Min = 5,
+        Max = 20,
+        Rounding = 1,
+        Callback = function(Value)
+            HIT_RANGE = Value
+            saveSettings()
+        end
+    })
+
+    Tabs.Settings:AddButton({
+        Title = "Save Settings",
+        Description = "Save current configuration",
+        Callback = function()
+            saveSettings()
+            if Fluent and Fluent.Notify then
+                Fluent:Notify({
+                    Title = "Settings Saved",
+                    Content = "Your settings have been saved successfully",
+                    Duration = 3
+                })
+            end
+        end
+    })
+
+    Tabs.Settings:AddButton({
+        Title = "Load Settings",
+        Description = "Load saved configuration",
+        Callback = function()
+            if loadSettings() then
+                -- Update UI elements safely
+                pcall(function()
+                    if Options.AutoFarm and Options.AutoFarm.SetValue then Options.AutoFarm:SetValue(autoFarm) end
+                    if Options.AutoAttack and Options.AutoAttack.SetValue then Options.AutoAttack:SetValue(autoAttack) end
+                    if Options.AutoAbility and Options.AutoAbility.SetValue then Options.AutoAbility:SetValue(abilityActive) end
+                    if Options.OrbitRadius and Options.OrbitRadius.SetValue then Options.OrbitRadius:SetValue(orbitRadius) end
+                    if Options.HeightOffset and Options.HeightOffset.SetValue then Options.HeightOffset:SetValue(heightOffset) end
+                    if Options.AttackDelay and Options.AttackDelay.SetValue then Options.AttackDelay:SetValue(attackDelay) end
+                    if Options.HitRange and Options.HitRange.SetValue then Options.HitRange:SetValue(HIT_RANGE) end
+                end)
+                
+                if Fluent and Fluent.Notify then
+                    Fluent:Notify({
+                        Title = "Settings Loaded",
+                        Content = "Your settings have been loaded successfully",
+                        Duration = 3
+                    })
+                end
+            else
+                if Fluent and Fluent.Notify then
+                    Fluent:Notify({
+                        Title = "Load Failed",
+                        Content = "No saved settings found or error loading",
+                        Duration = 3
+                    })
+                end
+            end
+        end
+    })
+end)
 
 -- About Tab
-Tabs.About:AddParagraph({
-    Title = "Auto Farm Pro",
-    Content = "Version 2.0\nA professional auto farming solution.\n\nFeatures include automatic orbiting, attacking, ability usage, and customizable settings."
-})
+pcall(function()
+    Tabs.About:AddParagraph({
+        Title = "Auto Farm Pro",
+        Content = "Version 2.0\nA professional auto farming solution.\n\nFeatures include automatic orbiting, attacking, ability usage, and customizable settings."
+    })
 
-Tabs.About:AddParagraph({
-    Title = "How to Use",
-    Content = "1. Enable Auto Farm to automatically orbit and attack nearby mobs\n2. Use Settings to customize orbit distance, height, and attack delay\n3. Toggle Auto Ability to use skills automatically"
-})
+    Tabs.About:AddParagraph({
+        Title = "How to Use",
+        Content = "1. Enable Auto Farm to automatically orbit and attack nearby mobs\n2. Use Settings to customize orbit distance, height, and attack delay\n3. Toggle Auto Ability to use skills automatically"
+    })
+end)
 
 -- Integrate SaveManager and InterfaceManager
-SaveManager:SetLibrary(Fluent)
-InterfaceManager:SetLibrary(Fluent)
+pcall(function()
+    if SaveManager and SaveManager.SetLibrary then SaveManager:SetLibrary(Fluent) end
+    if InterfaceManager and InterfaceManager.SetLibrary then InterfaceManager:SetLibrary(Fluent) end
 
-SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({"AutoFarm", "AutoAttack", "AutoAbility"})
+    if SaveManager and SaveManager.IgnoreThemeSettings then SaveManager:IgnoreThemeSettings() end
+    if SaveManager and SaveManager.SetIgnoreIndexes then SaveManager:SetIgnoreIndexes({"AutoFarm", "AutoAttack", "AutoAbility"}) end
 
-InterfaceManager:SetFolder("AutoFarmPro")
-SaveManager:SetFolder("AutoFarmPro/ConfigUI")
+    if InterfaceManager and InterfaceManager.SetFolder then InterfaceManager:SetFolder("AutoFarmPro") end
+    if SaveManager and SaveManager.SetFolder then SaveManager:SetFolder("AutoFarmPro/ConfigUI") end
 
-InterfaceManager:BuildInterfaceSection(Tabs.Settings)
-SaveManager:BuildConfigSection(Tabs.Settings)
+    if InterfaceManager and InterfaceManager.BuildInterfaceSection then InterfaceManager:BuildInterfaceSection(Tabs.Settings) end
+    if SaveManager and SaveManager.BuildConfigSection then SaveManager:BuildConfigSection(Tabs.Settings) end
 
--- Final setup
-Window:SelectTab(1)
+    -- Final setup
+    Window:SelectTab(1)
 
--- Load auto-load config if available
-SaveManager:LoadAutoloadConfig()
+    -- Load auto-load config if available
+    if SaveManager and SaveManager.LoadAutoloadConfig then SaveManager:LoadAutoloadConfig() end
+end)
 
-Fluent:Notify({
-    Title = "Auto Farm Pro",
-    Content = "Script loaded successfully!",
-    Duration = 5
-})
+if Fluent and Fluent.Notify then
+    Fluent:Notify({
+        Title = "Auto Farm Pro",
+        Content = "Script loaded successfully!",
+        Duration = 5
+    })
+end
 
 -- Handle character respawn
 player.CharacterAdded:Connect(function(newCharacter)
     character = newCharacter
-    humanoidRootPart = character:WaitForChild("HumanoidRootPart")
     
-    -- Re-enable features if they were active
+    -- Wait for HumanoidRootPart with error handling
+    pcall(function()
+        humanoidRootPart = character:WaitForChild("HumanoidRootPart", 5)
+        
+        -- Re-enable features if they were active
+        if autoFarm then
+            weaponEquipped = false
+            task.wait(1)
+            equipWeapon()
+            startOrbiting()
+        elseif autoAttack then
+            weaponEquipped = false
+            task.wait(1)
+            equipWeapon()
+            startAttackLoop()
+        end
+        
+        if abilityActive then
+            toggleAbility(true)
+        end
+    end)
+end)
+
+-- Apply settings immediately if enabled
+pcall(function()
     if autoFarm then
-        weaponEquipped = false
-        task.wait(1)
         equipWeapon()
         startOrbiting()
     elseif autoAttack then
-        weaponEquipped = false
-        task.wait(1)
         equipWeapon()
         startAttackLoop()
     end
-    
+
     if abilityActive then
         toggleAbility(true)
     end
-})
-
--- Apply settings immediately if enabled
-if autoFarm then
-    equipWeapon()
-    startOrbiting()
-elseif autoAttack then
-    equipWeapon()
-    startAttackLoop()
-end
-
-if abilityActive then
-    toggleAbility(true)
-end
+end)
