@@ -37,7 +37,7 @@ local success, err = pcall(function()
     Window = MacLib:Window({
         Title = "Auto Farm Pro",
         Subtitle = "Ultimate Farm Helper",
-        Size = UDim2.fromOffset(500, 300),
+        Size = UDim2.fromOffset(700, 550),
         DragStyle = 1,
         DisabledWindowControls = {},
         ShowUserInfo = true,
@@ -50,143 +50,6 @@ if not success or not Window then
     warn("Failed to create window: " .. tostring(err))
     return
 end
-
--- SaveManager Implementation
-local SaveManager = {}
-local configFolder = "AutoFarmPro"
-
-function SaveManager:SetFolder(Folder)
-    configFolder = Folder
-    return self
-end
-
-function SaveManager:SaveConfig(Path)
-    local data = {}
-    
-    -- Loop through all elements with flags and save their values
-    for flag, element in pairs(Window.Elements) do
-        if element and element.Flag and not element.IgnoreConfig then
-            local value = element:GetValue()
-            data[flag] = value
-        end
-    end
-    
-    -- Create path if it doesn't contain .json
-    local fullPath = Path
-    if not string.find(Path, ".json") then
-        fullPath = Path .. ".json"
-    end
-    
-    -- Make sure the path has a valid name
-    if #fullPath <= 5 then
-        Window:Notify({
-            Title = "Invalid Path",
-            Description = "Please provide a valid config name",
-            Lifetime = 3
-        })
-        return
-    end
-    
-    -- Save the config
-    pcall(function()
-        writefile(configFolder .. "/" .. fullPath, httpService:JSONEncode(data))
-    end)
-    
-    Window:Notify({
-        Title = "Config Saved",
-        Description = "Saved config to " .. fullPath,
-        Lifetime = 3
-    })
-    
-    return self
-end
-
-function SaveManager:LoadConfig(Path)
-    -- Create path if it doesn't contain .json
-    local fullPath = Path
-    if not string.find(Path, ".json") then
-        fullPath = Path .. ".json"
-    end
-    
-    -- Check if file exists
-    if not pcall(function() return readfile(configFolder .. "/" .. fullPath) end) then
-        Window:Notify({
-            Title = "Config Not Found",
-            Description = "Config " .. fullPath .. " does not exist",
-            Lifetime = 3
-        })
-        return
-    end
-    
-    -- Load the config data
-    local data = httpService:JSONDecode(readfile(configFolder .. "/" .. fullPath))
-    
-    -- Apply the data to elements
-    for flag, value in pairs(data) do
-        local element = Window.Elements[flag]
-        if element and element.SetValue then
-            element:SetValue(value)
-        end
-    end
-    
-    Window:Notify({
-        Title = "Config Loaded",
-        Description = "Loaded config from " .. fullPath,
-        Lifetime = 3
-    })
-    
-    return self
-end
-
-function SaveManager:RefreshConfigList()
-    local list = {}
-    
-    -- Make sure folder exists
-    pcall(function()
-        if not isfolder(configFolder) then
-            makefolder(configFolder)
-        end
-    end)
-    
-    -- Get all files in the folder
-    local success, files = pcall(function()
-        return listfiles(configFolder)
-    end)
-    
-    if success and files then
-        for _, file in ipairs(files) do
-            local filename = file:match("([^/\\]+)$") -- Extract filename from path
-            if filename:match("%.json$") then -- Only include .json files
-                table.insert(list, filename)
-            end
-        end
-    end
-    
-    return list
-end
-
-function SaveManager:LoadAutoLoadConfig()
-    -- Check if auto load config exists
-    local success, autoLoadConfig = pcall(function()
-        if isfile(configFolder .. "/autoload.txt") then
-            return readfile(configFolder .. "/autoload.txt")
-        end
-        return nil
-    end)
-    
-    if success and autoLoadConfig then
-        self:LoadConfig(autoLoadConfig)
-    end
-    
-    return self
-end
-
--- Ensuring the config folder exists
-pcall(function()
-    if not isfolder(configFolder) then
-        makefolder(configFolder)
-    end
-end)
 
 -- Global Settings
 local globalSettings = {
@@ -236,16 +99,14 @@ local tabGroups = {
 local tabs = {
     Main = tabGroups.TabGroup1:Tab({ Name = "Main", Image = "rbxassetid://18821914323" }),
     Settings = tabGroups.TabGroup1:Tab({ Name = "Settings", Image = "rbxassetid://10734950309" }),
-    Info = tabGroups.TabGroup1:Tab({ Name = "Info", Image = "rbxassetid://10734948147" }),
-    Config = tabGroups.TabGroup1:Tab({ Name = "Config", Image = "rbxassetid://10734691225" }) -- New Config tab
+    Info = tabGroups.TabGroup1:Tab({ Name = "Info", Image = "rbxassetid://10734948147" })
 }
 
 -- Create sections
 local sections = {
     MainSection = tabs.Main:Section({ Side = "Left" }),
     SettingsSection = tabs.Settings:Section({ Side = "Left" }),
-    InfoSection = tabs.Info:Section({ Side = "Left" }),
-    ConfigSection = tabs.Config:Section({ Side = "Left" }) -- New Config section
+    InfoSection = tabs.Info:Section({ Side = "Left" })
 }
 
 -- Core functions
@@ -439,6 +300,7 @@ pcall(function()
             if Value then
                 if not weaponEquipped then equipWeapon() end
                 startOrbiting()
+                -- We're not using Options anymore as we've removed SaveManager
             else
                 stopAutoFarm()
             end
@@ -739,12 +601,12 @@ pcall(function()
     
     sections.InfoSection:Paragraph({
         Header = "Features",
-        Body = "• Automatic orbiting around enemies\n• Smart attacking with customizable delay\n• Auto ability usage\n• Customizable settings\n• Target prioritization\n• Visual effects and highlighting\n• Config saving and loading system"
+        Body = "• Automatic orbiting around enemies\n• Smart attacking with customizable delay\n• Auto ability usage\n• Customizable settings\n• Target prioritization\n• Visual effects and highlighting"
     })
 
     sections.InfoSection:Paragraph({
         Header = "How to Use",
-        Body = "1. Enable Auto Farm to automatically orbit and attack nearby mobs\n2. Use Settings to customize orbit distance, height, and attack delay\n3. Toggle Auto Ability to use skills automatically\n4. Set up hotkeys for quick access to common functions\n5. Save your settings in the Config tab"
+        Body = "1. Enable Auto Farm to automatically orbit and attack nearby mobs\n2. Use Settings to customize orbit distance, height, and attack delay\n3. Toggle Auto Ability to use skills automatically\n4. Set up hotkeys for quick access to common functions"
     })
     
     sections.InfoSection:Label({
@@ -756,218 +618,6 @@ pcall(function()
     })
 end)
 
--- Config Tab
-pcall(function()
-    sections.ConfigSection:Header({
-        Text = "Configuration Management"
-    })
-    
-    sections.ConfigSection:Paragraph({
-        Header = "Save & Load Settings",
-        Body = "Create and manage your farm configurations"
-    })
-    
-    -- Save config section
-    local configNameInput
-    
-    configNameInput = sections.ConfigSection:Input({
-        Name = "Config Name",
-        Placeholder = "Enter config name...",
-        AcceptedCharacters = "All",
-        Callback = function(input)
-            -- Callback is triggered when the user submits the input
-        end,
-    }, "ConfigName")
-    
-    sections.ConfigSection:Button({
-        Name = "Save Config",
-        Callback = function()
-            local configName = configNameInput:GetValue()
-            if configName and configName:gsub("%s", "") ~= "" then
-                SaveManager:SaveConfig(configName)
-            else
-                Window:Notify({
-                    Title = "Error",
-                    Description = "Please enter a config name",
-                    Lifetime = 3
-                })
-            end
-        end,
-    })
-    
-    sections.ConfigSection:Divider()
-    
-    -- Load config section
-    local configs = SaveManager:RefreshConfigList()
-    local configDropdown
-    
-    configDropdown = sections.ConfigSection:Dropdown({
-        Name = "Select Config",
-        Multi = false,
-        Required = true,
-        Options = configs,
-        Default = configs[1] or "",
-        Callback = function(Value)
-            -- Callback when user selects a config
-        end,
-    }, "ConfigDropdown")
-    
-    sections.ConfigSection:Button({
-        Name = "Load Selected Config",
-        Callback = function()
-            local selected = configDropdown:GetValue()
-            if selected and selected ~= "" then
-                SaveManager:LoadConfig(selected)
-            else
-                Window:Notify({
-                    Title = "Error",
-                    Description = "Please select a config to load",
-                    Lifetime = 3
-                })
-            end
-        end,
-    })
-    
-    sections.ConfigSection:Button({
-        Name = "Refresh Config List",
-        Callback = function()
-            local newConfigs = SaveManager:RefreshConfigList()
-            configDropdown:UpdateOptions(newConfigs)
-            Window:Notify({
-                Title = "Config List",
-                Description = "Refreshed config list, found " .. #newConfigs .. " configs",
-                Lifetime = 3
-            })
-        end,
-    })
-    
-    sections.ConfigSection:Divider()
-    
-    -- Auto load section
-    sections.ConfigSection:Button({
-        Name = "Set As Auto Load",
-        Callback = function()
-            local selected = configDropdown:GetValue()
-            if selected and selected ~= "" then
-                -- Save this config as the auto load config
-                pcall(function()
-                    writefile(configFolder .. "/autoload.txt", selected)
-                end)
-                
-                Window:Notify({
-                    Title = "Auto Load",
-                    Description = "Set " .. selected .. " as auto load config",
-                    Lifetime = 3
-                })
-            else
-                Window:Notify({
-                    Title = "Error",
-                    Description = "Please select a config first",
-                    Lifetime = 3
-                })
-            end
-        end,
-    })
-    
-    sections.ConfigSection:Button({
-        Name = "Clear Auto Load",
-        Callback = function()
-            pcall(function()
-                if isfile(configFolder .. "/autoload.txt") then
-                    delfile(configFolder .. "/autoload.txt")
-                    
-                    Window:Notify({
-                        Title = "Auto Load",
-                        Description = "Cleared auto load config",
-                        Lifetime = 3
-                    })
-                else
-                    Window:Notify({
-                        Title = "Auto Load",
-                        Description = "No auto load config set",
-                        Lifetime = 3
-                    })
-                end
-            end)
-        end,
-    })
-    
-    sections.ConfigSection:Divider()
-    
-    -- Delete config section
-    sections.ConfigSection:Button({
-        Name = "Delete Selected Config",
-        Callback = function()
-            local selected = configDropdown:GetValue()
-            if selected and selected ~= "" then
-                local confirmDelete = true -- Add confirmation dialog if possible
-                
-                if confirmDelete then
-                    pcall(function()
-                        delfile(configFolder .. "/" .. selected)
-                        
-                        -- Refresh the dropdown
-                        local newConfigs = SaveManager:RefreshConfigList()
-                        configDropdown:UpdateOptions(newConfigs)
-                        
-                        Window:Notify({
-                            Title = "Config Deleted",
-                            Description = "Deleted config: " .. selected,
-                            Lifetime = 3
-                        })
-                    end)
-                end
-            else
-                Window:Notify({
-                    Title = "Error",
-                    Description = "Please select a config to delete",
-                    Lifetime = 3
-                })
-            end
-        end,
-    })
-    
-    -- Setup config folder input
-    sections.ConfigSection:Divider()
-    
-    sections.ConfigSection:Header({
-        Text = "Advanced Configuration"
-    })
-    
-    local folderInput
-    
-    folderInput = sections.ConfigSection:Input({
-        Name = "Config Folder",
-        Placeholder = configFolder,
-        AcceptedCharacters = "All",
-        Callback = function(input)
-            if input and input:gsub("%s", "") ~= "" then
-                SaveManager:SetFolder(input)
-                
-                -- Create folder if it doesn't exist
-                pcall(function()
-                    if not isfolder(input) then
-                        makefolder(input)
-                    end
-                end)
-                
-                Window:Notify({
-                    Title = "Config Folder",
-                    Description = "Set folder to: " .. input,
-                    Lifetime = 3
-                })
-                
-                -- Refresh the configs list
-                local newConfigs = SaveManager:RefreshConfigList()
-                configDropdown:UpdateOptions(newConfigs)
-            end
-        end,
-    }, "ConfigFolder")
-    
-    -- Initialize with current folder
-    folderInput:SetValue(configFolder)
-end)
-
 Window.onUnloaded(function()
     if orbitConnection then orbitConnection:Disconnect() end
     if humanoidRootPart then
@@ -977,9 +627,6 @@ Window.onUnloaded(function()
 end)
 
 tabs.Main:Select()
-
--- Load auto load config if it exists
-SaveManager:LoadAutoLoadConfig()
 
 -- Apply settings immediately if enabled
 pcall(function()
@@ -1017,5 +664,15 @@ player.CharacterAdded:Connect(function(newCharacter)
             equipWeapon()
             startAttackLoop()
         end
+        
+        if abilityActive then
+            toggleAbility(true)
+        end
     end)
 end)
+
+Window:Notify({
+    Title = "Auto Farm Pro",
+    Description = "Script loaded successfully!",
+    Lifetime = 5
+})
