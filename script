@@ -1,12 +1,4 @@
-local Library = loadstring(game:HttpGetAsync("https://github.com/ActualMasterOogway/Fluent-Renewed/releases/latest/download/Fluent.luau"))()
-local SaveManager = loadstring(game:HttpGetAsync("https://raw.githubusercontent.com/ActualMasterOogway/Fluent-Renewed/master/Addons/SaveManager.luau"))()
-local InterfaceManager = loadstring(game:HttpGetAsync("https://raw.githubusercontent.com/ActualMasterOogway/Fluent-Renewed/master/Addons/InterfaceManager.luau"))()
-
--- Check if libraries loaded successfully
-if not Fluent then
-    warn("Fluent library failed to load. Script cannot continue.")
-    return
-end
+local MacLib = loadstring(game:HttpGet("https://github.com/biggaboy212/Maclib/releases/latest/download/maclib.txt"))()
 
 -- Game services
 local player = game.Players.LocalPlayer
@@ -38,19 +30,19 @@ local orbitRadius = 10
 local orbitAngle = 0
 local heightOffset = 2.5
 local attackDelay = 0.1
-local saveFileName = "AutoFarmSettings.json"
 
--- Create Fluent Window with error handling
+-- Create MacLib Window with error handling
 local Window
 local success, err = pcall(function()
-    Window = Fluent:CreateWindow({
-        Title = "Auto Farm Pro " .. (Fluent.Version or "Unknown"),
-        SubTitle = "Ultimate Farm Helper",
-        TabWidth = 160,
-        Size = UDim2.fromOffset(600, 460),
-        Acrylic = true,
-        Theme = "Dark",
-        MinimizeKey = Enum.KeyCode.RightControl
+    Window = MacLib:Window({
+        Title = "Auto Farm Pro",
+        Subtitle = "Ultimate Farm Helper",
+        Size = UDim2.fromOffset(868, 650),
+        DragStyle = 1,
+        DisabledWindowControls = {},
+        ShowUserInfo = true,
+        Keybind = Enum.KeyCode.RightControl,
+        AcrylicBlur = true,
     })
 end)
 
@@ -59,23 +51,202 @@ if not success or not Window then
     return
 end
 
--- Create tabs with validation
-local Tabs = {}
-local success, err = pcall(function()
-    Tabs = {
-        Main = Window:AddTab({ Title = "Main", Icon = "sword" }),
-        Settings = Window:AddTab({ Title = "Settings", Icon = "settings" }),
-        About = Window:AddTab({ Title = "Info", Icon = "info" })
-    }
-end)
+-- SaveManager Implementation
+local SaveManager = {}
+local configFolder = "AutoFarmPro"
 
-if not success or not Tabs.Main then
-    warn("Failed to create tabs: " .. tostring(err))
-    return
+function SaveManager:SetFolder(Folder)
+    configFolder = Folder
+    return self
 end
 
--- Initialize Options with safety check
-local Options = Fluent.Options or {}
+function SaveManager:SaveConfig(Path)
+    local data = {}
+    
+    -- Loop through all elements with flags and save their values
+    for flag, element in pairs(Window.Elements) do
+        if element and element.Flag and not element.IgnoreConfig then
+            local value = element:GetValue()
+            data[flag] = value
+        end
+    end
+    
+    -- Create path if it doesn't contain .json
+    local fullPath = Path
+    if not string.find(Path, ".json") then
+        fullPath = Path .. ".json"
+    end
+    
+    -- Make sure the path has a valid name
+    if #fullPath <= 5 then
+        Window:Notify({
+            Title = "Invalid Path",
+            Description = "Please provide a valid config name",
+            Lifetime = 3
+        })
+        return
+    end
+    
+    -- Save the config
+    pcall(function()
+        writefile(configFolder .. "/" .. fullPath, httpService:JSONEncode(data))
+    end)
+    
+    Window:Notify({
+        Title = "Config Saved",
+        Description = "Saved config to " .. fullPath,
+        Lifetime = 3
+    })
+    
+    return self
+end
+
+function SaveManager:LoadConfig(Path)
+    -- Create path if it doesn't contain .json
+    local fullPath = Path
+    if not string.find(Path, ".json") then
+        fullPath = Path .. ".json"
+    end
+    
+    -- Check if file exists
+    if not pcall(function() return readfile(configFolder .. "/" .. fullPath) end) then
+        Window:Notify({
+            Title = "Config Not Found",
+            Description = "Config " .. fullPath .. " does not exist",
+            Lifetime = 3
+        })
+        return
+    end
+    
+    -- Load the config data
+    local data = httpService:JSONDecode(readfile(configFolder .. "/" .. fullPath))
+    
+    -- Apply the data to elements
+    for flag, value in pairs(data) do
+        local element = Window.Elements[flag]
+        if element and element.SetValue then
+            element:SetValue(value)
+        end
+    end
+    
+    Window:Notify({
+        Title = "Config Loaded",
+        Description = "Loaded config from " .. fullPath,
+        Lifetime = 3
+    })
+    
+    return self
+end
+
+function SaveManager:RefreshConfigList()
+    local list = {}
+    
+    -- Make sure folder exists
+    pcall(function()
+        if not isfolder(configFolder) then
+            makefolder(configFolder)
+        end
+    end)
+    
+    -- Get all files in the folder
+    local success, files = pcall(function()
+        return listfiles(configFolder)
+    end)
+    
+    if success and files then
+        for _, file in ipairs(files) do
+            local filename = file:match("([^/\\]+)$") -- Extract filename from path
+            if filename:match("%.json$") then -- Only include .json files
+                table.insert(list, filename)
+            end
+        end
+    end
+    
+    return list
+end
+
+function SaveManager:LoadAutoLoadConfig()
+    -- Check if auto load config exists
+    local success, autoLoadConfig = pcall(function()
+        if isfile(configFolder .. "/autoload.txt") then
+            return readfile(configFolder .. "/autoload.txt")
+        end
+        return nil
+    end)
+    
+    if success and autoLoadConfig then
+        self:LoadConfig(autoLoadConfig)
+    end
+    
+    return self
+end
+
+-- Ensuring the config folder exists
+pcall(function()
+    if not isfolder(configFolder) then
+        makefolder(configFolder)
+    end
+end)
+
+-- Global Settings
+local globalSettings = {
+    UIBlurToggle = Window:GlobalSetting({
+        Name = "UI Blur",
+        Default = Window:GetAcrylicBlurState(),
+        Callback = function(bool)
+            Window:SetAcrylicBlurState(bool)
+            Window:Notify({
+                Title = Window.Settings.Title,
+                Description = (bool and "Enabled" or "Disabled") .. " UI Blur",
+                Lifetime = 5
+            })
+        end,
+    }),
+    NotificationToggler = Window:GlobalSetting({
+        Name = "Notifications",
+        Default = Window:GetNotificationsState(),
+        Callback = function(bool)
+            Window:SetNotificationsState(bool)
+            Window:Notify({
+                Title = Window.Settings.Title,
+                Description = (bool and "Enabled" or "Disabled") .. " Notifications",
+                Lifetime = 5
+            })
+        end,
+    }),
+    ShowUserInfo = Window:GlobalSetting({
+        Name = "Show User Info",
+        Default = Window:GetUserInfoState(),
+        Callback = function(bool)
+            Window:SetUserInfoState(bool)
+            Window:Notify({
+                Title = Window.Settings.Title,
+                Description = (bool and "Showing" or "Redacted") .. " User Info",
+                Lifetime = 5
+            })
+        end,
+    })
+}
+
+-- Create tabs
+local tabGroups = {
+    TabGroup1 = Window:TabGroup()
+}
+
+local tabs = {
+    Main = tabGroups.TabGroup1:Tab({ Name = "Main", Image = "rbxassetid://18821914323" }),
+    Settings = tabGroups.TabGroup1:Tab({ Name = "Settings", Image = "rbxassetid://10734950309" }),
+    Info = tabGroups.TabGroup1:Tab({ Name = "Info", Image = "rbxassetid://10734948147" }),
+    Config = tabGroups.TabGroup1:Tab({ Name = "Config", Image = "rbxassetid://10734691225" }) -- New Config tab
+}
+
+-- Create sections
+local sections = {
+    MainSection = tabs.Main:Section({ Side = "Left" }),
+    SettingsSection = tabs.Settings:Section({ Side = "Left" }),
+    InfoSection = tabs.Info:Section({ Side = "Left" }),
+    ConfigSection = tabs.Config:Section({ Side = "Left" }) -- New Config section
+}
 
 -- Core functions
 local function getClosestMob()
@@ -249,257 +420,581 @@ local function toggleAbility(isEnabled)
     end
 end
 
-local function saveSettings()
-    local settings = {
-        autoFarm = autoFarm,
-        autoAttack = autoAttack,
-        abilityActive = abilityActive,
-        orbitRadius = orbitRadius,
-        heightOffset = heightOffset,
-        attackDelay = attackDelay,
-        HIT_RANGE = HIT_RANGE
-    }
-    
-    pcall(function()
-        writefile(saveFileName, httpService:JSONEncode(settings))
-    end)
-end
-
-local function loadSettings()
-    local success, settings = pcall(function()
-        if isfile and isfile(saveFileName) then
-            return httpService:JSONDecode(readfile(saveFileName))
-        end
-        return nil
-    end)
-    
-    if success and settings then
-        autoFarm = settings.autoFarm or false
-        autoAttack = settings.autoAttack or false
-        abilityActive = settings.abilityActive or false
-        orbitRadius = settings.orbitRadius or 10
-        heightOffset = settings.heightOffset or 2.5
-        attackDelay = settings.attackDelay or 0.1
-        HIT_RANGE = settings.HIT_RANGE or 10
-        return true
-    end
-    return false
-end
-
-pcall(loadSettings)
-
--- UI Components
+-- Main Tab UI Components
 pcall(function()
-    Tabs.Main:AddParagraph({
-        Title = "Welcome to Auto Farm Pro",
-        Content = "The ultimate farming solution. Toggle features below to begin."
+    sections.MainSection:Header({
+        Text = "Welcome to Auto Farm Pro"
+    })
+    
+    sections.MainSection:Paragraph({
+        Header = "Farm Helper",
+        Body = "The ultimate farming solution. Toggle features below to begin."
     })
 
-    local AutoFarmToggle = Tabs.Main:AddToggle("AutoFarm", {
-        Title = "Auto Farm",
-        Description = "Automatically orbit and attack nearby enemies",
-        Default = autoFarm
-    })
-
-    if AutoFarmToggle then
-        AutoFarmToggle:OnChanged(function(Value)
+    sections.MainSection:Toggle({
+        Name = "Auto Farm",
+        Default = autoFarm,
+        Callback = function(Value)
             autoFarm = Value
             if Value then
                 if not weaponEquipped then equipWeapon() end
                 startOrbiting()
-                if Options.AutoAttack and Options.AutoAttack.SetValue then
-                    Options.AutoAttack:SetValue(true)
-                end
             else
                 stopAutoFarm()
             end
-            saveSettings()
-        end)
-    end
+        end,
+    }, "AutoFarm")
 
-    local AutoAttackToggle = Tabs.Main:AddToggle("AutoAttack", {
-        Title = "Auto Attack",
-        Description = "Automatically attack without orbiting",
-        Default = autoAttack
-    })
-
-    if AutoAttackToggle then
-        AutoAttackToggle:OnChanged(function(Value)
+    sections.MainSection:Toggle({
+        Name = "Auto Attack",
+        Default = autoAttack,
+        Callback = function(Value)
             autoAttack = Value
             if Value then
                 if not weaponEquipped then equipWeapon() end
                 startAttackLoop()
             end
-            saveSettings()
-        end)
-    end
+        end,
+    }, "AutoAttack")
 
-    local AbilityToggle = Tabs.Main:AddToggle("AutoAbility", {
-        Title = "Auto Ability",
-        Description = "Automatically use abilities",
-        Default = abilityActive
+    sections.MainSection:Toggle({
+        Name = "Auto Ability",
+        Default = abilityActive,
+        Callback = function(Value)
+            toggleAbility(Value)
+        end,
+    }, "AutoAbility")
+
+    sections.MainSection:Divider()
+    
+    sections.MainSection:Header({
+        Text = "Quick Actions"
     })
 
-    if AbilityToggle then
-        AbilityToggle:OnChanged(function(Value)
-            toggleAbility(Value)
-            saveSettings()
-        end)
-    end
-
-    Tabs.Main:AddButton({
-        Title = "Equip Weapon",
+    sections.MainSection:Button({
+        Name = "Equip Weapon",
         Callback = function()
             equipWeapon()
-            if Fluent.Notify then
-                Fluent:Notify({ Title = "Weapon", Content = "Weapon equipped successfully", Duration = 3 })
-            end
-        end
+            Window:Notify({
+                Title = "Weapon",
+                Description = "Weapon equipped successfully",
+                Lifetime = 3
+            })
+        end,
     })
 
-    Tabs.Main:AddButton({
-        Title = "Find Closest Mob",
+    sections.MainSection:Button({
+        Name = "Find Closest Mob",
         Callback = function()
             local mob, distance = getClosestMob()
-            if Fluent.Notify then
-                if mob then
-                    Fluent:Notify({ Title = "Found Mob", Content = "Closest mob: " .. (mob.Name or "Unknown") .. " (Distance: " .. math.floor(distance) .. ")", Duration = 3 })
-                else
-                    Fluent:Notify({ Title = "No Mobs Found", Content = "Could not find any mobs nearby", Duration = 3 })
-                end
+            if mob then
+                Window:Notify({
+                    Title = "Found Mob",
+                    Description = "Closest mob: " .. (mob.Name or "Unknown") .. " (Distance: " .. math.floor(distance) .. ")",
+                    Lifetime = 3
+                })
+            else
+                Window:Notify({
+                    Title = "No Mobs Found",
+                    Description = "Could not find any mobs nearby",
+                    Lifetime = 3
+                })
             end
-        end
+        end,
     })
+    
+    -- Adding some example elements from MacLib
+    sections.MainSection:Divider()
+    
+    sections.MainSection:Header({
+        Text = "Extra Features"
+    })
+    
+    -- Example keybind
+    sections.MainSection:Keybind({
+        Name = "Quick Toggle Farm",
+        Blacklist = false,
+        Callback = function(binded)
+            autoFarm = not autoFarm
+            if autoFarm then
+                if not weaponEquipped then equipWeapon() end
+                startOrbiting()
+            else
+                stopAutoFarm()
+            end
+            Window:Notify({
+                Title = "Auto Farm Pro",
+                Description = (autoFarm and "Enabled" or "Disabled") .. " farming with hotkey",
+                Lifetime = 3
+            })
+        end,
+        onBinded = function(bind)
+            Window:Notify({
+                Title = "Auto Farm Pro",
+                Description = "Successfully bound farm toggle to " .. tostring(bind.Name),
+                Lifetime = 3
+            })
+        end,
+    }, "FarmKeybind")
+    
+    -- Example colorpicker
+    sections.MainSection:Colorpicker({
+        Name = "Highlight Color",
+        Default = Color3.fromRGB(0, 255, 255),
+        Callback = function(color)
+            -- In a real implementation, this could highlight targets
+            Window:Notify({
+                Title = "Auto Farm Pro", 
+                Description = "Changed highlight color",
+                Lifetime = 2
+            })
+        end,
+    }, "HighlightColor")
+    
+    -- Example dropdown
+    local targetOptions = {
+        "Closest Enemy",
+        "Highest Level",
+        "Lowest Health",
+        "Most Valuable",
+        "Boss Enemies"
+    }
+    
+    sections.MainSection:Dropdown({
+        Name = "Target Priority",
+        Multi = false,
+        Required = true,
+        Options = targetOptions,
+        Default = 1,
+        Callback = function(Value)
+            Window:Notify({
+                Title = "Target Priority",
+                Description = "Set priority to: " .. Value,
+                Lifetime = 3
+            })
+        end,
+    }, "TargetDropdown")
+    
+    -- Multi-selection example
+    local skillOptions = {
+        "FlurryOfBlows",
+        "BloodyCut",
+        "Invisibility",
+        "RapidStrike",
+        "DeathBlow",
+        "ShadowStep",
+        "HealingAura"
+    }
+    
+    sections.MainSection:Dropdown({
+        Name = "Auto-Use Skills",
+        Search = true,
+        Multi = true,
+        Required = false,
+        Options = skillOptions,
+        Default = {"FlurryOfBlows", "BloodyCut", "Invisibility"},
+        Callback = function(Value)
+            local selectedSkills = {}
+            for Skill, State in next, Value do
+                table.insert(selectedSkills, Skill)
+            end
+            Window:Notify({
+                Title = "Skills Updated",
+                Description = "Selected skills: " .. table.concat(selectedSkills, ", "),
+                Lifetime = 3
+            })
+        end,
+    }, "SkillsDropdown")
 end)
 
 -- Settings Tab
 pcall(function()
-    Tabs.Settings:AddSlider("OrbitRadius", {
-        Title = "Orbit Radius",
-        Description = "Distance to orbit around mobs",
+    sections.SettingsSection:Header({
+        Text = "Auto Farm Settings"
+    })
+
+    sections.SettingsSection:Slider({
+        Name = "Orbit Radius",
         Default = orbitRadius,
-        Min = 5,
-        Max = 20,
-        Rounding = 1,
+        Minimum = 5,
+        Maximum = 20,
+        DisplayMethod = "Value",
+        Precision = 1,
         Callback = function(Value)
             orbitRadius = Value
-            saveSettings()
         end
-    })
+    }, "OrbitRadius")
 
-    Tabs.Settings:AddSlider("HeightOffset", {
-        Title = "Height Offset",
-        Description = "Height above mob",
+    sections.SettingsSection:Slider({
+        Name = "Height Offset",
         Default = heightOffset,
-        Min = 0,
-        Max = 10,
-        Rounding = 0.5,
+        Minimum = 0,
+        Maximum = 10,
+        DisplayMethod = "Value",
+        Precision = 0.5,
         Callback = function(Value)
             heightOffset = Value
-            saveSettings()
         end
-    })
+    }, "HeightOffset")
 
-    Tabs.Settings:AddSlider("AttackDelay", {
-        Title = "Attack Delay",
-        Description = "Delay between attacks",
+    sections.SettingsSection:Slider({
+        Name = "Attack Delay",
         Default = attackDelay,
-        Min = 0.05,
-        Max = 1,
-        Rounding = 0.05,
+        Minimum = 0.05,
+        Maximum = 1,
+        DisplayMethod = "Value",
+        Precision = 0.05,
         Callback = function(Value)
             attackDelay = Value
-            saveSettings()
         end
-    })
+    }, "AttackDelay")
 
-    Tabs.Settings:AddSlider("HitRange", {
-        Title = "Hit Range",
-        Description = "Maximum attack range",
+    sections.SettingsSection:Slider({
+        Name = "Hit Range",
         Default = HIT_RANGE,
-        Min = 5,
-        Max = 20,
-        Rounding = 1,
+        Minimum = 5,
+        Maximum = 20,
+        DisplayMethod = "Value",
+        Precision = 1,
         Callback = function(Value)
             HIT_RANGE = Value
-            saveSettings()
         end
+    }, "HitRange")
+    
+    sections.SettingsSection:Divider()
+    
+    sections.SettingsSection:Header({
+        Text = "Advanced Settings"
     })
-
-    Tabs.Settings:AddButton({
-        Title = "Save Settings",
-        Callback = function()
-            saveSettings()
-            if Fluent.Notify then
-                Fluent:Notify({ Title = "Settings Saved", Content = "Your settings have been saved successfully", Duration = 3 })
-            end
-        end
-    })
-
-    Tabs.Settings:AddButton({
-        Title = "Load Settings",
-        Callback = function()
-            if loadSettings() then
-                pcall(function()
-                    if Options.AutoFarm and Options.AutoFarm.SetValue then Options.AutoFarm:SetValue(autoFarm) end
-                    if Options.AutoAttack and Options.AutoAttack.SetValue then Options.AutoAttack:SetValue(autoAttack) end
-                    if Options.AutoAbility and Options.AutoAbility.SetValue then Options.AutoAbility:SetValue(abilityActive) end
-                    if Options.OrbitRadius and Options.OrbitRadius.SetValue then Options.OrbitRadius:SetValue(orbitRadius) end
-                    if Options.HeightOffset and Options.HeightOffset.SetValue then Options.HeightOffset:SetValue(heightOffset) end
-                    if Options.AttackDelay and Options.AttackDelay.SetValue then Options.AttackDelay:SetValue(attackDelay) end
-                    if Options.HitRange and Options.HitRange.SetValue then Options.HitRange:SetValue(HIT_RANGE) end
+    
+    -- Example input
+    sections.SettingsSection:Input({
+        Name = "Custom Enemy Filter",
+        Placeholder = "Enter enemy names...",
+        AcceptedCharacters = "All",
+        Callback = function(input)
+            Window:Notify({
+                Title = "Enemy Filter",
+                Description = "Custom filter applied: " .. input
+            })
+        end,
+        onChanged = function(input)
+            print("Filter being typed: " .. input)
+        end,
+    }, "EnemyFilter")
+    
+    -- Example alpha colorpicker
+    local alphaColorPicker = sections.SettingsSection:Colorpicker({
+        Name = "Orbit Visualization",
+        Default = Color3.fromRGB(255,0,0),
+        Alpha = 0.5,
+        Callback = function(color, alpha)
+            Window:Notify({
+                Title = "Visualization",
+                Description = "Updated orbit visualization settings"
+            })
+        end,
+    }, "OrbitVisualization")
+    
+    -- Example rainbow toggle
+    local rainbowActive = false
+    local rainbowConnection
+    local hue = 0
+    
+    sections.SettingsSection:Toggle({
+        Name = "Rainbow Effect",
+        Default = false,
+        Callback = function(value)
+            rainbowActive = value
+    
+            if rainbowActive then
+                rainbowConnection = game:GetService("RunService").RenderStepped:Connect(function(deltaTime)
+                    hue = (hue + deltaTime * 0.1) % 1
+                    alphaColorPicker:SetColor(Color3.fromHSV(hue, 1, 1))
                 end)
-                if Fluent.Notify then
-                    Fluent:Notify({ Title = "Settings Loaded", Content = "Your settings have been loaded successfully", Duration = 3 })
+            elseif rainbowConnection then
+                rainbowConnection:Disconnect()
+                rainbowConnection = nil
+            end
+            
+            Window:Notify({
+                Title = "Visual Effects",
+                Description = (value and "Enabled" or "Disabled") .. " rainbow effect",
+                Lifetime = 3
+            })
+        end,
+    }, "RainbowToggle")
+end)
+
+-- Info Tab
+pcall(function()
+    sections.InfoSection:Header({
+        Text = "Auto Farm Pro"
+    })
+
+    sections.InfoSection:Paragraph({
+        Header = "Version",
+        Body = "Version 2.0\nA professional auto farming solution."
+    })
+    
+    sections.InfoSection:Paragraph({
+        Header = "Features",
+        Body = "• Automatic orbiting around enemies\n• Smart attacking with customizable delay\n• Auto ability usage\n• Customizable settings\n• Target prioritization\n• Visual effects and highlighting\n• Config saving and loading system"
+    })
+
+    sections.InfoSection:Paragraph({
+        Header = "How to Use",
+        Body = "1. Enable Auto Farm to automatically orbit and attack nearby mobs\n2. Use Settings to customize orbit distance, height, and attack delay\n3. Toggle Auto Ability to use skills automatically\n4. Set up hotkeys for quick access to common functions\n5. Save your settings in the Config tab"
+    })
+    
+    sections.InfoSection:Label({
+        Text = "Converted from Fluent UI to MacLib UI"
+    })
+    
+    sections.InfoSection:SubLabel({
+        Text = "For any issues or suggestions, please contact the developer"
+    })
+end)
+
+-- Config Tab
+pcall(function()
+    sections.ConfigSection:Header({
+        Text = "Configuration Management"
+    })
+    
+    sections.ConfigSection:Paragraph({
+        Header = "Save & Load Settings",
+        Body = "Create and manage your farm configurations"
+    })
+    
+    -- Save config section
+    local configNameInput
+    
+    configNameInput = sections.ConfigSection:Input({
+        Name = "Config Name",
+        Placeholder = "Enter config name...",
+        AcceptedCharacters = "All",
+        Callback = function(input)
+            -- Callback is triggered when the user submits the input
+        end,
+    }, "ConfigName")
+    
+    sections.ConfigSection:Button({
+        Name = "Save Config",
+        Callback = function()
+            local configName = configNameInput:GetValue()
+            if configName and configName:gsub("%s", "") ~= "" then
+                SaveManager:SaveConfig(configName)
+            else
+                Window:Notify({
+                    Title = "Error",
+                    Description = "Please enter a config name",
+                    Lifetime = 3
+                })
+            end
+        end,
+    })
+    
+    sections.ConfigSection:Divider()
+    
+    -- Load config section
+    local configs = SaveManager:RefreshConfigList()
+    local configDropdown
+    
+    configDropdown = sections.ConfigSection:Dropdown({
+        Name = "Select Config",
+        Multi = false,
+        Required = true,
+        Options = configs,
+        Default = configs[1] or "",
+        Callback = function(Value)
+            -- Callback when user selects a config
+        end,
+    }, "ConfigDropdown")
+    
+    sections.ConfigSection:Button({
+        Name = "Load Selected Config",
+        Callback = function()
+            local selected = configDropdown:GetValue()
+            if selected and selected ~= "" then
+                SaveManager:LoadConfig(selected)
+            else
+                Window:Notify({
+                    Title = "Error",
+                    Description = "Please select a config to load",
+                    Lifetime = 3
+                })
+            end
+        end,
+    })
+    
+    sections.ConfigSection:Button({
+        Name = "Refresh Config List",
+        Callback = function()
+            local newConfigs = SaveManager:RefreshConfigList()
+            configDropdown:UpdateOptions(newConfigs)
+            Window:Notify({
+                Title = "Config List",
+                Description = "Refreshed config list, found " .. #newConfigs .. " configs",
+                Lifetime = 3
+            })
+        end,
+    })
+    
+    sections.ConfigSection:Divider()
+    
+    -- Auto load section
+    sections.ConfigSection:Button({
+        Name = "Set As Auto Load",
+        Callback = function()
+            local selected = configDropdown:GetValue()
+            if selected and selected ~= "" then
+                -- Save this config as the auto load config
+                pcall(function()
+                    writefile(configFolder .. "/autoload.txt", selected)
+                end)
+                
+                Window:Notify({
+                    Title = "Auto Load",
+                    Description = "Set " .. selected .. " as auto load config",
+                    Lifetime = 3
+                })
+            else
+                Window:Notify({
+                    Title = "Error",
+                    Description = "Please select a config first",
+                    Lifetime = 3
+                })
+            end
+        end,
+    })
+    
+    sections.ConfigSection:Button({
+        Name = "Clear Auto Load",
+        Callback = function()
+            pcall(function()
+                if isfile(configFolder .. "/autoload.txt") then
+                    delfile(configFolder .. "/autoload.txt")
+                    
+                    Window:Notify({
+                        Title = "Auto Load",
+                        Description = "Cleared auto load config",
+                        Lifetime = 3
+                    })
+                else
+                    Window:Notify({
+                        Title = "Auto Load",
+                        Description = "No auto load config set",
+                        Lifetime = 3
+                    })
+                end
+            end)
+        end,
+    })
+    
+    sections.ConfigSection:Divider()
+    
+    -- Delete config section
+    sections.ConfigSection:Button({
+        Name = "Delete Selected Config",
+        Callback = function()
+            local selected = configDropdown:GetValue()
+            if selected and selected ~= "" then
+                local confirmDelete = true -- Add confirmation dialog if possible
+                
+                if confirmDelete then
+                    pcall(function()
+                        delfile(configFolder .. "/" .. selected)
+                        
+                        -- Refresh the dropdown
+                        local newConfigs = SaveManager:RefreshConfigList()
+                        configDropdown:UpdateOptions(newConfigs)
+                        
+                        Window:Notify({
+                            Title = "Config Deleted",
+                            Description = "Deleted config: " .. selected,
+                            Lifetime = 3
+                        })
+                    end)
                 end
             else
-                if Fluent.Notify then
-                    Fluent:Notify({ Title = "Load Failed", Content = "No saved settings found or error loading", Duration = 3 })
-                end
+                Window:Notify({
+                    Title = "Error",
+                    Description = "Please select a config to delete",
+                    Lifetime = 3
+                })
             end
-        end
+        end,
     })
+    
+    -- Setup config folder input
+    sections.ConfigSection:Divider()
+    
+    sections.ConfigSection:Header({
+        Text = "Advanced Configuration"
+    })
+    
+    local folderInput
+    
+    folderInput = sections.ConfigSection:Input({
+        Name = "Config Folder",
+        Placeholder = configFolder,
+        AcceptedCharacters = "All",
+        Callback = function(input)
+            if input and input:gsub("%s", "") ~= "" then
+                SaveManager:SetFolder(input)
+                
+                -- Create folder if it doesn't exist
+                pcall(function()
+                    if not isfolder(input) then
+                        makefolder(input)
+                    end
+                end)
+                
+                Window:Notify({
+                    Title = "Config Folder",
+                    Description = "Set folder to: " .. input,
+                    Lifetime = 3
+                })
+                
+                -- Refresh the configs list
+                local newConfigs = SaveManager:RefreshConfigList()
+                configDropdown:UpdateOptions(newConfigs)
+            end
+        end,
+    }, "ConfigFolder")
+    
+    -- Initialize with current folder
+    folderInput:SetValue(configFolder)
 end)
 
--- About Tab
+Window.onUnloaded(function()
+    if orbitConnection then orbitConnection:Disconnect() end
+    if humanoidRootPart then
+        pcall(function() humanoidRootPart.Anchored = false end)
+    end
+    print("Auto Farm Pro unloaded!")
+end)
+
+tabs.Main:Select()
+
+-- Load auto load config if it exists
+SaveManager:LoadAutoLoadConfig()
+
+-- Apply settings immediately if enabled
 pcall(function()
-    Tabs.About:AddParagraph({
-        Title = "Auto Farm Pro",
-        Content = "Version 2.0\nA professional auto farming solution.\n\nFeatures include automatic orbiting, attacking, ability usage, and customizable settings."
-    })
+    if autoFarm then
+        equipWeapon()
+        startOrbiting()
+    elseif autoAttack then
+        equipWeapon()
+        startAttackLoop()
+    end
 
-    Tabs.About:AddParagraph({
-        Title = "How to Use",
-        Content = "1. Enable Auto Farm to automatically orbit and attack nearby mobs\n2. Use Settings to customize orbit distance, height, and attack delay\n3. Toggle Auto Ability to use skills automatically"
-    })
+    if abilityActive then
+        toggleAbility(true)
+    end
 end)
-
--- Integrate SaveManager and InterfaceManager
-pcall(function()
-    if SaveManager and SaveManager.SetLibrary then SaveManager:SetLibrary(Fluent) end
-    if InterfaceManager and InterfaceManager.SetLibrary then InterfaceManager:SetLibrary(Fluent) end
-
-    if SaveManager and SaveManager.IgnoreThemeSettings then SaveManager:IgnoreThemeSettings() end
-    if SaveManager and SaveManager.SetIgnoreIndexes then SaveManager:SetIgnoreIndexes({"AutoFarm", "AutoAttack", "AutoAbility"}) end
-
-    if InterfaceManager and InterfaceManager.SetFolder then InterfaceManager:SetFolder("AutoFarmPro") end
-    if SaveManager and SaveManager.SetFolder then SaveManager:SetFolder("AutoFarmPro/ConfigUI") end
-
-    if InterfaceManager and InterfaceManager.BuildInterfaceSection then InterfaceManager:BuildInterfaceSection(Tabs.Settings) end
-    if SaveManager and SaveManager.BuildConfigSection then SaveManager:BuildConfigSection(Tabs.Settings) end
-
-    Window:SelectTab(1)
-
-    if SaveManager and SaveManager.LoadAutoloadConfig then SaveManager:LoadAutoloadConfig() end
-end)
-
-if Fluent.Notify then
-    Fluent:Notify({
-        Title = "Auto Farm Pro",
-        Content = "Script loaded successfully!",
-        Duration = 5
-    })
-end
 
 -- Handle character respawn
 player.CharacterAdded:Connect(function(newCharacter)
@@ -522,24 +1017,5 @@ player.CharacterAdded:Connect(function(newCharacter)
             equipWeapon()
             startAttackLoop()
         end
-        
-        if abilityActive then
-            toggleAbility(true)
-        end
     end)
-end)
-
--- Apply settings immediately if enabled
-pcall(function()
-    if autoFarm then
-        equipWeapon()
-        startOrbiting()
-    elseif autoAttack then
-        equipWeapon()
-        startAttackLoop()
-    end
-
-    if abilityActive then
-        toggleAbility(true)
-    end
 end)
