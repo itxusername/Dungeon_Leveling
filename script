@@ -5,6 +5,7 @@ local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/rel
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
 
 -- Player and Character
 local player = Players.LocalPlayer
@@ -16,24 +17,44 @@ if not humanoidRootPart then
     return
 end
 
+-- Config Save System
+local saveFilePath = "AutoFarmPro_Settings.txt"
+
+local function loadSettings()
+    local success, data = pcall(function()
+        return HttpService:JSONDecode(readfile(saveFilePath))
+    end)
+    if success then
+        return data
+    else
+        return {}
+    end
+end
+
+local function saveSettings(settings)
+    pcall(function()
+        writefile(saveFilePath, HttpService:JSONEncode(settings))
+    end)
+end
+
+-- Load saved settings
+local savedSettings = loadSettings()
+
 -- Auto Farm Core Variables
 local AutoFarmCore = {
     enabled = false,
     weaponEquipped = false,
-    attackDelay = 0.1,
-    hitRange = 15,
-    heightOffset = -3, -- Position below enemy
     autoAttackLoop = nil,
     teleportConnection = nil,
 }
 
--- Settings
+-- Settings with saved values
 local Settings = {
-    attackDelay = 0.1,
-    hitRange = 15,
-    heightOffset = -3,
-    autoAbility = false,
-    selectedSkills = {"FlurryOfBlows", "BloodyCut", "Invisibility"},
+    attackDelay = savedSettings.attackDelay or 0.1,
+    hitRange = savedSettings.hitRange or 15,
+    heightOffset = savedSettings.heightOffset or -3,
+    autoAbility = savedSettings.autoAbility or false,
+    selectedSkills = savedSettings.selectedSkills or {"FlurryOfBlows", "BloodyCut", "Invisibility"},
 }
 
 -- Utility Functions
@@ -59,7 +80,13 @@ local function getClosestMob()
     local closestMob = nil
     local closestDistance = math.huge
     
-    for _, mob in ipairs(workspace:GetChildren()) do
+    local charactersFolder = workspace:FindFirstChild("Characters")
+    if not charactersFolder then
+        warn("Characters folder not found in workspace")
+        return nil, math.huge
+    end
+    
+    for _, mob in ipairs(charactersFolder:GetChildren()) do
         if mob:IsA("Model") and 
            mob ~= character and 
            mob:FindFirstChild("HumanoidRootPart") and 
@@ -117,13 +144,8 @@ local function attackEnemy()
     equipWeapon()
     
     safeCall(function()
-        local events = getEvents()
-        if events then
-            local combatEvent = events:FindFirstChild("Combat")
-            if combatEvent then
-                combatEvent:FireServer("Attack")
-            end
-        end
+        local args = {"Attack"}
+        ReplicatedStorage:WaitForChild("Events"):WaitForChild("Combat"):FireServer(unpack(args))
     end)
     
     return true
@@ -167,11 +189,11 @@ local function startAutoFarm()
         end
     end)
     
-    -- Attack loop
+    -- Attack loop with 0.1 speed
     AutoFarmCore.autoAttackLoop = task.spawn(function()
         while AutoFarmCore.enabled do
             attackEnemy()
-            task.wait(Settings.attackDelay)
+            task.wait(0.1)
         end
     end)
     
@@ -223,36 +245,13 @@ local Window = WindUI:CreateWindow({
     },
 })
 
--- Create Sections
-local MainSection = Window:Section({
-    Title = "Auto Farm Controls",
-    Icon = "settings",
-    Opened = true,
-})
-
-local SettingsSection = Window:Section({
-    Title = "Configuration",
-    Icon = "sliders",
-    Opened = false,
-})
-
--- Create Tabs
+-- Create Main Tab
 local MainTab = Window:Tab({
     Title = "Main Farm",
     Icon = "zap",
 })
 
-local SettingsTab = Window:Tab({
-    Title = "Settings",
-    Icon = "settings",
-})
-
-local InfoTab = Window:Tab({
-    Title = "Information",
-    Icon = "info",
-})
-
--- Main Tab Components
+-- Main Auto Farm Toggle
 local AutoFarmToggle = MainTab:Toggle({
     Title = "Auto Farm",
     Desc = "Enable unified auto farming (TP + Attack + Weapon)",
@@ -268,14 +267,59 @@ local AutoFarmToggle = MainTab:Toggle({
     end
 })
 
+-- Settings under Auto Farm
+local AttackDelaySlider = MainTab:Slider({
+    Title = "Attack Delay",
+    Step = 0.05,
+    Value = {
+        Min = 0.05,
+        Max = 1.0,
+        Default = Settings.attackDelay,
+    },
+    Callback = function(value)
+        Settings.attackDelay = value
+        saveSettings(Settings)
+    end
+})
+
+local HitRangeSlider = MainTab:Slider({
+    Title = "Hit Range",
+    Step = 1,
+    Value = {
+        Min = 5,
+        Max = 30,
+        Default = Settings.hitRange,
+    },
+    Callback = function(value)
+        Settings.hitRange = value
+        saveSettings(Settings)
+    end
+})
+
+local HeightOffsetSlider = MainTab:Slider({
+    Title = "Height Offset",
+    Step = 0.5,
+    Value = {
+        Min = -10,
+        Max = 5,
+        Default = Settings.heightOffset,
+    },
+    Callback = function(value)
+        Settings.heightOffset = value
+        saveSettings(Settings)
+    end
+})
+
+-- Auto Abilities
 local AutoAbilityToggle = MainTab:Toggle({
     Title = "Auto Abilities",
     Desc = "Automatically use selected skills",
     Icon = "sparkles",
     Type = "Checkbox",
-    Default = false,
+    Default = Settings.autoAbility,
     Callback = function(state)
         Settings.autoAbility = state
+        saveSettings(Settings)
         if AutoFarmCore.enabled then
             stopAutoFarm()
             task.wait(0.1)
@@ -287,7 +331,7 @@ local AutoAbilityToggle = MainTab:Toggle({
 local SkillDropdown = MainTab:Dropdown({
     Title = "Skills to Use",
     Values = {"FlurryOfBlows", "BloodyCut", "Invisibility", "RapidStrike", "DeathBlow", "ShadowStep", "HealingAura"},
-    Value = {"FlurryOfBlows", "BloodyCut", "Invisibility"},
+    Value = Settings.selectedSkills,
     Multi = true,
     AllowNone = false,
     Callback = function(skills)
@@ -297,6 +341,7 @@ local SkillDropdown = MainTab:Dropdown({
                 table.insert(Settings.selectedSkills, skill)
             end
         end
+        saveSettings(Settings)
     end
 })
 
@@ -310,87 +355,32 @@ local EquipWeaponButton = MainTab:Button({
     end
 })
 
-local FindMobButton = MainTab:Button({
-    Title = "Find Closest Mob",
-    Desc = "Locate and display nearest enemy",
+-- Save/Load Configuration Buttons
+local SaveConfigButton = MainTab:Button({
+    Title = "Save Configuration",
+    Desc = "Save current settings to file",
     Callback = function()
-        local mob, distance = getClosestMob()
-        if mob then
-            print("Closest mob: " .. (mob.Name or "Unknown") .. " at distance: " .. math.floor(distance))
+        saveSettings(Settings)
+        print("Configuration saved successfully!")
+    end
+})
+
+local LoadConfigButton = MainTab:Button({
+    Title = "Load Configuration",
+    Desc = "Load settings from file",
+    Callback = function()
+        local loadedSettings = loadSettings()
+        if next(loadedSettings) then
+            Settings = loadedSettings
+            print("Configuration loaded successfully!")
+            -- Update UI elements with loaded values
+            AttackDelaySlider:SetValue(Settings.attackDelay)
+            HitRangeSlider:SetValue(Settings.hitRange)
+            HeightOffsetSlider:SetValue(Settings.heightOffset)
+            AutoAbilityToggle:SetValue(Settings.autoAbility)
         else
-            print("No mobs found nearby")
+            print("No saved configuration found!")
         end
-    end
-})
-
-local TeleportButton = MainTab:Button({
-    Title = "Teleport to Mob",
-    Desc = "Manually teleport to closest enemy",
-    Callback = function()
-        local mob = getClosestMob()
-        if mob then
-            teleportToMob(mob)
-        end
-    end
-})
-
--- Settings Tab Components
-local AttackDelaySlider = SettingsTab:Slider({
-    Title = "Attack Delay",
-    Step = 0.05,
-    Value = {
-        Min = 0.05,
-        Max = 1.0,
-        Default = 0.1,
-    },
-    Callback = function(value)
-        Settings.attackDelay = value
-    end
-})
-
-local HitRangeSlider = SettingsTab:Slider({
-    Title = "Hit Range",
-    Step = 1,
-    Value = {
-        Min = 5,
-        Max = 30,
-        Default = 15,
-    },
-    Callback = function(value)
-        Settings.hitRange = value
-    end
-})
-
-local HeightOffsetSlider = SettingsTab:Slider({
-    Title = "Height Offset",
-    Step = 0.5,
-    Value = {
-        Min = -10,
-        Max = 5,
-        Default = -3,
-    },
-    Callback = function(value)
-        Settings.heightOffset = value
-    end
-})
-
--- Target Priority Dropdown (for future use)
-local TargetPriorityDropdown = SettingsTab:Dropdown({
-    Title = "Target Priority",
-    Values = {"Closest Enemy", "Highest Level", "Lowest Health", "Most Valuable", "Boss Enemies"},
-    Value = "Closest Enemy",
-    Callback = function(priority)
-        print("Target priority set to: " .. priority)
-        -- Implementation for different targeting logic can be added here
-    end
-})
-
--- Info Tab Components
-MainTab:Button({
-    Title = "Script Information",
-    Desc = "View details about Auto Farm Pro",
-    Callback = function()
-        Window:SelectTab(3) -- Switch to Info tab
     end
 })
 
@@ -423,10 +413,18 @@ game:GetService("GuiService").ErrorMessageChanged:Connect(function()
     end
 end)
 
+-- Auto-save settings periodically
+task.spawn(function()
+    while task.wait(30) do -- Save every 30 seconds
+        saveSettings(Settings)
+    end
+end)
+
 -- Initialize
 print("Auto Farm Pro loaded successfully!")
 print("Features: Unified Auto Farm (TP + Attack + Weapon Equip)")
 print("UI Library: Wind UI")
+print("Configuration: Auto-saved")
 
 -- Select main tab by default
 Window:SelectTab(1)
