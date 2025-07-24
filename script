@@ -18,7 +18,7 @@ if not humanoidRootPart then
 end
 
 -- Config Save System
-local saveFilePath = "AutoFarmPro_Settings.txt"
+local saveFilePath = "workspace.Settings.txt"
 
 local function loadSettings()
     local success, data = pcall(function()
@@ -57,6 +57,14 @@ local Settings = {
     selectedSkills = savedSettings.selectedSkills or {"FlurryOfBlows", "BloodyCut", "Invisibility"},
 }
 
+-- NPC Blacklist - NPCs to avoid targeting
+local npcBlacklist = {
+    ["Louis"] = true,
+    ["Louis (NPC)"] = true,
+    ["Louis (NPC) [1]"] = true,
+    -- Add more NPCs to avoid here
+}
+
 -- Utility Functions
 local function safeCall(func, ...)
     local success, result = pcall(func, ...)
@@ -75,6 +83,62 @@ local function getEvents()
     return events
 end
 
+-- Enhanced NPC Detection
+local function isValidTarget(mob)
+    -- Check if mob exists and is a model
+    if not mob or not mob:IsA("Model") then
+        return false
+    end
+    
+    -- Don't target player character
+    if mob == character then
+        return false
+    end
+    
+    -- Check if mob is blacklisted
+    local mobName = mob.Name
+    if npcBlacklist[mobName] then
+        return false
+    end
+    
+    -- Check for common NPC name patterns
+    if string.find(mobName:lower(), "npc") or 
+       string.find(mobName:lower(), "shop") or 
+       string.find(mobName:lower(), "vendor") or
+       string.find(mobName:lower(), "merchant") then
+        return false
+    end
+    
+    -- Must have HumanoidRootPart
+    local hrp = mob:FindFirstChild("HumanoidRootPart")
+    if not hrp then
+        return false
+    end
+    
+    -- Must have Humanoid
+    local humanoid = mob:FindFirstChild("Humanoid")
+    if not humanoid then
+        return false
+    end
+    
+    -- Must be alive (health > 0)
+    if humanoid.Health <= 0 then
+        return false
+    end
+    
+    -- Additional check: Must have MaxHealth > 0 (some NPCs have 0 MaxHealth)
+    if humanoid.MaxHealth <= 0 then
+        return false
+    end
+    
+    -- Check if humanoid is in a "Dead" or "Physics" state
+    if humanoid.PlatformStand or humanoid:GetState() == Enum.HumanoidStateType.Dead then
+        return false
+    end
+    
+    return true
+end
+
 -- Core Functionality
 local function getClosestMob()
     local closestMob = nil
@@ -87,12 +151,7 @@ local function getClosestMob()
     end
     
     for _, mob in ipairs(charactersFolder:GetChildren()) do
-        if mob:IsA("Model") and 
-           mob ~= character and 
-           mob:FindFirstChild("HumanoidRootPart") and 
-           mob:FindFirstChild("Humanoid") and 
-           mob.Humanoid.Health > 0 then
-            
+        if isValidTarget(mob) then
             local distance = (mob.HumanoidRootPart.Position - humanoidRootPart.Position).Magnitude
             if distance < closestDistance then
                 closestDistance = distance
@@ -141,7 +200,10 @@ local function attackEnemy()
         return false
     end
     
-    equipWeapon()
+    -- Auto-equip weapon if not equipped
+    if not AutoFarmCore.weaponEquipped then
+        equipWeapon()
+    end
     
     safeCall(function()
         local args = {"Attack"}
@@ -177,6 +239,9 @@ local function startAutoFarm()
     if AutoFarmCore.enabled then return end
     
     AutoFarmCore.enabled = true
+    
+    -- Auto-equip weapon when starting
+    AutoFarmCore.weaponEquipped = false
     equipWeapon()
     
     -- Main teleport and attack loop
@@ -345,45 +410,6 @@ local SkillDropdown = MainTab:Dropdown({
     end
 })
 
--- Quick Action Buttons
-local EquipWeaponButton = MainTab:Button({
-    Title = "Equip Weapon",
-    Desc = "Manually equip weapon",
-    Callback = function()
-        AutoFarmCore.weaponEquipped = false
-        equipWeapon()
-    end
-})
-
--- Save/Load Configuration Buttons
-local SaveConfigButton = MainTab:Button({
-    Title = "Save Configuration",
-    Desc = "Save current settings to file",
-    Callback = function()
-        saveSettings(Settings)
-        print("Configuration saved successfully!")
-    end
-})
-
-local LoadConfigButton = MainTab:Button({
-    Title = "Load Configuration",
-    Desc = "Load settings from file",
-    Callback = function()
-        local loadedSettings = loadSettings()
-        if next(loadedSettings) then
-            Settings = loadedSettings
-            print("Configuration loaded successfully!")
-            -- Update UI elements with loaded values
-            AttackDelaySlider:SetValue(Settings.attackDelay)
-            HitRangeSlider:SetValue(Settings.hitRange)
-            HeightOffsetSlider:SetValue(Settings.heightOffset)
-            AutoAbilityToggle:SetValue(Settings.autoAbility)
-        else
-            print("No saved configuration found!")
-        end
-    end
-})
-
 -- Handle Character Respawn
 player.CharacterAdded:Connect(function(newCharacter)
     character = newCharacter
@@ -422,9 +448,10 @@ end)
 
 -- Initialize
 print("Auto Farm Pro loaded successfully!")
-print("Features: Unified Auto Farm (TP + Attack + Weapon Equip)")
+print("Features: Unified Auto Farm (TP + Attack + Auto Weapon Equip)")
 print("UI Library: Wind UI")
-print("Configuration: Auto-saved")
+print("Configuration: Auto-saved to workspace.Settings.txt")
+print("Enhanced NPC Detection: Only targets live mobs")
 
 -- Select main tab by default
 Window:SelectTab(1)
