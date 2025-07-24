@@ -155,7 +155,7 @@ local function equipWeapon()
     end)
 end
 
--- Better teleport system for server recognition
+-- Simple teleport system like original (works with server recognition)
 local function teleportToMob(mob)
     if not mob or not mob:FindFirstChild("HumanoidRootPart") or not humanoidRootPart then
         return false
@@ -165,34 +165,8 @@ local function teleportToMob(mob)
         local mobPosition = mob.HumanoidRootPart.Position
         local targetPosition = mobPosition + Vector3.new(0, Settings.heightOffset, 0)
         
-        -- Force server to recognize position using multiple methods
+        -- Simple approach that works (like original script)
         humanoidRootPart.Anchored = false
-        humanoidRootPart.CFrame = CFrame.new(targetPosition)
-        
-        -- Network ownership approach
-        local bodyPosition = humanoidRootPart:FindFirstChild("BodyPosition")
-        if not bodyPosition then
-            bodyPosition = Instance.new("BodyPosition")
-            bodyPosition.MaxForce = Vector3.new(4000, 4000, 4000)
-            bodyPosition.Parent = humanoidRootPart
-        end
-        bodyPosition.Position = targetPosition
-        
-        -- Use Humanoid for server-side movement
-        local humanoid = character:FindFirstChild("Humanoid")
-        if humanoid then
-            humanoid.PlatformStand = true
-            humanoid:ChangeState(Enum.HumanoidStateType.Physics)
-            task.wait(0.1)
-            humanoid.PlatformStand = false
-            humanoid:ChangeState(Enum.HumanoidStateType.Running)
-        end
-        
-        -- Clean up and finalize
-        task.wait(0.05)
-        if bodyPosition then
-            bodyPosition:Destroy()
-        end
         humanoidRootPart.CFrame = CFrame.new(targetPosition, mobPosition)
         humanoidRootPart.Anchored = true
     end)
@@ -206,26 +180,20 @@ local function attackEnemy()
         return false
     end
     
+    -- Auto-equip weapon
     if not AutoFarmCore.weaponEquipped then
         equipWeapon()
-        task.wait(0.2)
     end
     
-    -- Ensure close positioning
-    if distance > 8 then
-        teleportToMob(mob)
-        task.wait(0.1)
-    end
-    
-    -- Verify position after teleport
-    local newDistance = (mob.HumanoidRootPart.Position - humanoidRootPart.Position).Magnitude
-    if newDistance > Settings.hitRange then
-        return false
-    end
-    
+    -- Attack using exact format from original
     safeCall(function()
-        local args = {"Attack"}
-        ReplicatedStorage:WaitForChild("Events"):WaitForChild("Combat"):FireServer(unpack(args))
+        local events = ReplicatedStorage:WaitForChild("Events", 3)
+        if not events then return end
+        
+        local combatEvent = events:FindFirstChild("Combat")
+        if combatEvent then
+            combatEvent:FireServer("Attack")
+        end
     end)
     
     return true
@@ -252,7 +220,7 @@ local function useSkill(skillName)
     end)
 end
 
--- Main auto farm system
+-- Main auto farm system (using original working approach)
 local function startAutoFarm()
     if AutoFarmCore.enabled then return end
     
@@ -260,24 +228,22 @@ local function startAutoFarm()
     AutoFarmCore.weaponEquipped = false
     equipWeapon()
     
-    -- Position loop
+    -- Continuous teleport and attack (like original)
     AutoFarmCore.teleportConnection = RunService.Heartbeat:Connect(function()
         if not AutoFarmCore.enabled then return end
         
         local mob = getClosestMob()
-        if mob then
-            local distance = (mob.HumanoidRootPart.Position - humanoidRootPart.Position).Magnitude
-            if distance > 10 then
-                teleportToMob(mob)
-            end
+        if mob and mob:FindFirstChild("HumanoidRootPart") then
+            -- Always teleport to stay close (like original orbiting)
+            teleportToMob(mob)
         end
     end)
     
     -- Attack loop
     AutoFarmCore.autoAttackLoop = task.spawn(function()
         while AutoFarmCore.enabled do
-            local success = attackEnemy()
-            task.wait(success and 0.2 or 0.1)
+            attackEnemy()
+            task.wait(Settings.attackDelay)
         end
     end)
     
@@ -288,9 +254,9 @@ local function startAutoFarm()
                 for _, skill in ipairs(Settings.selectedSkills) do
                     if not AutoFarmCore.enabled then break end
                     useSkill(skill)
-                    task.wait(0.5)
+                    task.wait(0.3)
                 end
-                task.wait(1)
+                task.wait(0.5)
             end
         end)
     end
@@ -307,10 +273,6 @@ local function stopAutoFarm()
     if humanoidRootPart then
         safeCall(function()
             humanoidRootPart.Anchored = false
-            local bodyPosition = humanoidRootPart:FindFirstChild("BodyPosition")
-            if bodyPosition then
-                bodyPosition:Destroy()
-            end
         end)
     end
 end
