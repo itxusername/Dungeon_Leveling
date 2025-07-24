@@ -187,8 +187,29 @@ local function teleportToMob(mob)
         local mobPosition = mob.HumanoidRootPart.Position
         local targetPosition = mobPosition + Vector3.new(0, Settings.heightOffset, 0)
         
-        humanoidRootPart.Anchored = true
+        -- First unanchor to ensure proper movement
+        humanoidRootPart.Anchored = false
+        
+        -- Use Humanoid to move (server-recognized movement)
+        local humanoid = character:FindFirstChild("Humanoid")
+        if humanoid then
+            humanoid:MoveTo(targetPosition)
+            
+            -- Wait a brief moment for movement to register
+            task.wait(0.05)
+        end
+        
+        -- Then set CFrame for precise positioning
         humanoidRootPart.CFrame = CFrame.new(targetPosition, mobPosition)
+        
+        -- Re-anchor for stability
+        humanoidRootPart.Anchored = true
+        
+        -- Force network ownership to ensure server recognizes position
+        if humanoidRootPart.AssemblyLinearVelocity then
+            humanoidRootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        end
+        humanoidRootPart.Velocity = Vector3.new(0, 0, 0)
     end)
     
     return true
