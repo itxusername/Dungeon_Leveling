@@ -1,46 +1,52 @@
 -- Load Wind UI
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
--- Game Services
+-- Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 
--- Player and Character
+-- Player setup
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart", 10)
 
 if not humanoidRootPart then
-    warn("HumanoidRootPart not found. Ensure your character has loaded properly.")
+    warn("HumanoidRootPart not found")
     return
 end
 
--- Config Save System
-local saveFilePath = "workspace.Settings.txt"
+-- Config system
+local saveFilePath = "workspace/Settings.txt"
 
 local function loadSettings()
-    local success, data = pcall(function()
-        return HttpService:JSONDecode(readfile(saveFilePath))
-    end)
-    if success then
-        return data
-    else
-        return {}
+    if not isfolder("workspace") then
+        makefolder("workspace")
     end
+    
+    local success, data = pcall(function()
+        if isfile(saveFilePath) then
+            return HttpService:JSONDecode(readfile(saveFilePath))
+        end
+        return {}
+    end)
+    return success and data or {}
 end
 
 local function saveSettings(settings)
+    if not isfolder("workspace") then
+        makefolder("workspace")
+    end
+    
     pcall(function()
         writefile(saveFilePath, HttpService:JSONEncode(settings))
     end)
 end
 
--- Load saved settings
 local savedSettings = loadSettings()
 
--- Auto Farm Core Variables
+-- Core variables
 local AutoFarmCore = {
     enabled = false,
     weaponEquipped = false,
@@ -48,7 +54,7 @@ local AutoFarmCore = {
     teleportConnection = nil,
 }
 
--- Settings with saved values
+-- Settings
 local Settings = {
     attackDelay = savedSettings.attackDelay or 0.1,
     hitRange = savedSettings.hitRange or 15,
@@ -57,15 +63,14 @@ local Settings = {
     selectedSkills = savedSettings.selectedSkills or {"FlurryOfBlows", "BloodyCut", "Invisibility"},
 }
 
--- NPC Blacklist - NPCs to avoid targeting
+-- NPC blacklist
 local npcBlacklist = {
     ["Louis"] = true,
     ["Louis (NPC)"] = true,
     ["Louis (NPC) [1]"] = true,
-    -- Add more NPCs to avoid here
 }
 
--- Utility Functions
+-- Utility functions
 local function safeCall(func, ...)
     local success, result = pcall(func, ...)
     if not success then
@@ -77,76 +82,48 @@ end
 local function getEvents()
     local events = ReplicatedStorage:FindFirstChild("Events")
     if not events then
-        warn("Events not found in ReplicatedStorage")
+        warn("Events not found")
         return nil
     end
     return events
 end
 
--- Enhanced NPC Detection
+-- Enhanced targeting
 local function isValidTarget(mob)
-    -- Check if mob exists and is a model
-    if not mob or not mob:IsA("Model") then
+    if not mob or not mob:IsA("Model") or mob == character then
         return false
     end
     
-    -- Don't target player character
-    if mob == character then
-        return false
-    end
-    
-    -- Check if mob is blacklisted
     local mobName = mob.Name
-    if npcBlacklist[mobName] then
-        return false
-    end
-    
-    -- Check for common NPC name patterns
-    if string.find(mobName:lower(), "npc") or 
+    if npcBlacklist[mobName] or 
+       string.find(mobName:lower(), "npc") or 
        string.find(mobName:lower(), "shop") or 
        string.find(mobName:lower(), "vendor") or
        string.find(mobName:lower(), "merchant") then
         return false
     end
     
-    -- Must have HumanoidRootPart
     local hrp = mob:FindFirstChild("HumanoidRootPart")
-    if not hrp then
-        return false
-    end
-    
-    -- Must have Humanoid
     local humanoid = mob:FindFirstChild("Humanoid")
-    if not humanoid then
+    
+    if not hrp or not humanoid then
         return false
     end
     
-    -- Must be alive (health > 0)
-    if humanoid.Health <= 0 then
-        return false
-    end
-    
-    -- Additional check: Must have MaxHealth > 0 (some NPCs have 0 MaxHealth)
-    if humanoid.MaxHealth <= 0 then
-        return false
-    end
-    
-    -- Check if humanoid is in a "Dead" or "Physics" state
-    if humanoid.PlatformStand or humanoid:GetState() == Enum.HumanoidStateType.Dead then
+    if humanoid.Health <= 0 or humanoid.MaxHealth <= 0 or
+       humanoid.PlatformStand or humanoid:GetState() == Enum.HumanoidStateType.Dead then
         return false
     end
     
     return true
 end
 
--- Core Functionality
 local function getClosestMob()
     local closestMob = nil
     local closestDistance = math.huge
     
     local charactersFolder = workspace:FindFirstChild("Characters")
     if not charactersFolder then
-        warn("Characters folder not found in workspace")
         return nil, math.huge
     end
     
@@ -178,6 +155,7 @@ local function equipWeapon()
     end)
 end
 
+-- Better teleport system for server recognition
 local function teleportToMob(mob)
     if not mob or not mob:FindFirstChild("HumanoidRootPart") or not humanoidRootPart then
         return false
@@ -187,29 +165,36 @@ local function teleportToMob(mob)
         local mobPosition = mob.HumanoidRootPart.Position
         local targetPosition = mobPosition + Vector3.new(0, Settings.heightOffset, 0)
         
-        -- First unanchor to ensure proper movement
+        -- Force server to recognize position using multiple methods
         humanoidRootPart.Anchored = false
+        humanoidRootPart.CFrame = CFrame.new(targetPosition)
         
-        -- Use Humanoid to move (server-recognized movement)
+        -- Network ownership approach
+        local bodyPosition = humanoidRootPart:FindFirstChild("BodyPosition")
+        if not bodyPosition then
+            bodyPosition = Instance.new("BodyPosition")
+            bodyPosition.MaxForce = Vector3.new(4000, 4000, 4000)
+            bodyPosition.Parent = humanoidRootPart
+        end
+        bodyPosition.Position = targetPosition
+        
+        -- Use Humanoid for server-side movement
         local humanoid = character:FindFirstChild("Humanoid")
         if humanoid then
-            humanoid:MoveTo(targetPosition)
-            
-            -- Wait a brief moment for movement to register
-            task.wait(0.05)
+            humanoid.PlatformStand = true
+            humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+            task.wait(0.1)
+            humanoid.PlatformStand = false
+            humanoid:ChangeState(Enum.HumanoidStateType.Running)
         end
         
-        -- Then set CFrame for precise positioning
+        -- Clean up and finalize
+        task.wait(0.05)
+        if bodyPosition then
+            bodyPosition:Destroy()
+        end
         humanoidRootPart.CFrame = CFrame.new(targetPosition, mobPosition)
-        
-        -- Re-anchor for stability
         humanoidRootPart.Anchored = true
-        
-        -- Force network ownership to ensure server recognizes position
-        if humanoidRootPart.AssemblyLinearVelocity then
-            humanoidRootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-        end
-        humanoidRootPart.Velocity = Vector3.new(0, 0, 0)
     end)
     
     return true
@@ -221,9 +206,21 @@ local function attackEnemy()
         return false
     end
     
-    -- Auto-equip weapon if not equipped
     if not AutoFarmCore.weaponEquipped then
         equipWeapon()
+        task.wait(0.2)
+    end
+    
+    -- Ensure close positioning
+    if distance > 8 then
+        teleportToMob(mob)
+        task.wait(0.1)
+    end
+    
+    -- Verify position after teleport
+    local newDistance = (mob.HumanoidRootPart.Position - humanoidRootPart.Position).Magnitude
+    if newDistance > Settings.hitRange then
+        return false
     end
     
     safeCall(function()
@@ -255,44 +252,45 @@ local function useSkill(skillName)
     end)
 end
 
--- Auto Farm System
+-- Main auto farm system
 local function startAutoFarm()
     if AutoFarmCore.enabled then return end
     
     AutoFarmCore.enabled = true
-    
-    -- Auto-equip weapon when starting
     AutoFarmCore.weaponEquipped = false
     equipWeapon()
     
-    -- Main teleport and attack loop
+    -- Position loop
     AutoFarmCore.teleportConnection = RunService.Heartbeat:Connect(function()
         if not AutoFarmCore.enabled then return end
         
         local mob = getClosestMob()
         if mob then
-            teleportToMob(mob)
+            local distance = (mob.HumanoidRootPart.Position - humanoidRootPart.Position).Magnitude
+            if distance > 10 then
+                teleportToMob(mob)
+            end
         end
     end)
     
-    -- Attack loop with 0.1 speed
+    -- Attack loop
     AutoFarmCore.autoAttackLoop = task.spawn(function()
         while AutoFarmCore.enabled do
-            attackEnemy()
-            task.wait(0.1)
+            local success = attackEnemy()
+            task.wait(success and 0.2 or 0.1)
         end
     end)
     
-    -- Ability loop (if enabled)
+    -- Ability loop
     if Settings.autoAbility then
         task.spawn(function()
             while AutoFarmCore.enabled and Settings.autoAbility do
                 for _, skill in ipairs(Settings.selectedSkills) do
                     if not AutoFarmCore.enabled then break end
                     useSkill(skill)
-                    task.wait(0.3)
+                    task.wait(0.5)
                 end
-                task.wait(0.5)
+                task.wait(1)
             end
         end)
     end
@@ -309,11 +307,15 @@ local function stopAutoFarm()
     if humanoidRootPart then
         safeCall(function()
             humanoidRootPart.Anchored = false
+            local bodyPosition = humanoidRootPart:FindFirstChild("BodyPosition")
+            if bodyPosition then
+                bodyPosition:Destroy()
+            end
         end)
     end
 end
 
--- Create Wind UI Window
+-- UI Creation
 local Window = WindUI:CreateWindow({
     Title = "Auto Farm Pro",
     Icon = "zap",
@@ -331,16 +333,15 @@ local Window = WindUI:CreateWindow({
     },
 })
 
--- Create Main Tab
 local MainTab = Window:Tab({
     Title = "Main Farm",
     Icon = "zap",
 })
 
--- Main Auto Farm Toggle
+-- Controls
 local AutoFarmToggle = MainTab:Toggle({
     Title = "Auto Farm",
-    Desc = "Enable unified auto farming (TP + Attack + Weapon)",
+    Desc = "Enable unified auto farming",
     Icon = "play",
     Type = "Checkbox",
     Default = false,
@@ -353,7 +354,6 @@ local AutoFarmToggle = MainTab:Toggle({
     end
 })
 
--- Settings under Auto Farm
 local AttackDelaySlider = MainTab:Slider({
     Title = "Attack Delay",
     Step = 0.05,
@@ -396,10 +396,9 @@ local HeightOffsetSlider = MainTab:Slider({
     end
 })
 
--- Auto Abilities
 local AutoAbilityToggle = MainTab:Toggle({
     Title = "Auto Abilities",
-    Desc = "Automatically use selected skills",
+    Desc = "Use selected skills automatically",
     Icon = "sparkles",
     Type = "Checkbox",
     Default = Settings.autoAbility,
@@ -431,7 +430,7 @@ local SkillDropdown = MainTab:Dropdown({
     end
 })
 
--- Handle Character Respawn
+-- Character respawn handling
 player.CharacterAdded:Connect(function(newCharacter)
     character = newCharacter
     humanoidRootPart = character:WaitForChild("HumanoidRootPart", 10)
@@ -441,38 +440,29 @@ player.CharacterAdded:Connect(function(newCharacter)
         return
     end
     
-    -- Reset weapon status
     AutoFarmCore.weaponEquipped = false
     
-    -- Restart auto farm if it was enabled
     if AutoFarmCore.enabled then
-        task.wait(2) -- Wait for character to fully load
+        task.wait(2)
         stopAutoFarm()
         task.wait(0.5)
         startAutoFarm()
     end
 end)
 
--- Cleanup on script end
+-- Cleanup
 game:GetService("GuiService").ErrorMessageChanged:Connect(function()
     if AutoFarmCore.enabled then
         stopAutoFarm()
     end
 end)
 
--- Auto-save settings periodically
+-- Auto-save
 task.spawn(function()
-    while task.wait(30) do -- Save every 30 seconds
+    while task.wait(30) do
         saveSettings(Settings)
     end
 end)
 
--- Initialize
-print("Auto Farm Pro loaded successfully!")
-print("Features: Unified Auto Farm (TP + Attack + Auto Weapon Equip)")
-print("UI Library: Wind UI")
-print("Configuration: Auto-saved to workspace.Settings.txt")
-print("Enhanced NPC Detection: Only targets live mobs")
-
--- Select main tab by default
+print("Auto Farm Pro loaded - Enhanced server detection")
 Window:SelectTab(1)
