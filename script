@@ -1,124 +1,74 @@
-local MacLib = loadstring(game:HttpGet("https://github.com/biggaboy212/Maclib/releases/latest/download/maclib.txt"))()
+-- Load Wind UI
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
--- Game services
-local player = game.Players.LocalPlayer
-local runService = game:GetService("RunService")
-local tweenService = game:GetService("TweenService")
-local userInput = game:GetService("UserInputService")
-local httpService = game:GetService("HttpService")
+-- Game Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- Variables with safety checks
+-- Player and Character
+local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
-local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart", 10)
 
--- Wait for HumanoidRootPart if not found
 if not humanoidRootPart then
-    humanoidRootPart = character:WaitForChild("HumanoidRootPart", 5)
-    if not humanoidRootPart then
-        warn("HumanoidRootPart not found. Make sure your character has loaded properly.")
-        return
-    end
-end
-
--- Auto farm settings
-local autoFarm = false
-local autoAttack = false
-local abilityActive = false
-local weaponEquipped = false
-local HIT_RANGE = 10
-local orbitRadius = 10
-local orbitAngle = 0
-local heightOffset = 2.5
-local attackDelay = 0.1
-
--- Create MacLib Window with error handling
-local Window
-local success, err = pcall(function()
-    Window = MacLib:Window({
-        Title = "Auto Farm Pro",
-        Subtitle = "Ultimate Farm Helper",
-        Size = UDim2.fromOffset(750, 750),
-        DragStyle = 1,
-        DisabledWindowControls = {},
-        ShowUserInfo = true,
-        Keybind = Enum.KeyCode.RightControl,
-        AcrylicBlur = true,
-    })
-end)
-
-if not success or not Window then
-    warn("Failed to create window: " .. tostring(err))
+    warn("HumanoidRootPart not found. Ensure your character has loaded properly.")
     return
 end
 
--- Global Settings
-local globalSettings = {
-    UIBlurToggle = Window:GlobalSetting({
-        Name = "UI Blur",
-        Default = Window:GetAcrylicBlurState(),
-        Callback = function(bool)
-            Window:SetAcrylicBlurState(bool)
-            Window:Notify({
-                Title = Window.Settings.Title,
-                Description = (bool and "Enabled" or "Disabled") .. " UI Blur",
-                Lifetime = 5
-            })
-        end,
-    }),
-    NotificationToggler = Window:GlobalSetting({
-        Name = "Notifications",
-        Default = Window:GetNotificationsState(),
-        Callback = function(bool)
-            Window:SetNotificationsState(bool)
-            Window:Notify({
-                Title = Window.Settings.Title,
-                Description = (bool and "Enabled" or "Disabled") .. " Notifications",
-                Lifetime = 5
-            })
-        end,
-    }),
-    ShowUserInfo = Window:GlobalSetting({
-        Name = "Show User Info",
-        Default = Window:GetUserInfoState(),
-        Callback = function(bool)
-            Window:SetUserInfoState(bool)
-            Window:Notify({
-                Title = Window.Settings.Title,
-                Description = (bool and "Showing" or "Redacted") .. " User Info",
-                Lifetime = 5
-            })
-        end,
-    })
+-- Auto Farm Core Variables
+local AutoFarmCore = {
+    enabled = false,
+    weaponEquipped = false,
+    attackDelay = 0.1,
+    hitRange = 15,
+    heightOffset = -3, -- Position below enemy
+    autoAttackLoop = nil,
+    teleportConnection = nil,
 }
 
--- Create tabs
-local tabGroups = {
-    TabGroup1 = Window:TabGroup()
+-- Settings
+local Settings = {
+    attackDelay = 0.1,
+    hitRange = 15,
+    heightOffset = -3,
+    autoAbility = false,
+    selectedSkills = {"FlurryOfBlows", "BloodyCut", "Invisibility"},
 }
 
-local tabs = {
-    Main = tabGroups.TabGroup1:Tab({ Name = "Main", Image = "rbxassetid://18821914323" }),
-    Settings = tabGroups.TabGroup1:Tab({ Name = "Settings", Image = "rbxassetid://10734950309" }),
-    Info = tabGroups.TabGroup1:Tab({ Name = "Info", Image = "rbxassetid://10734948147" })
-}
+-- Utility Functions
+local function safeCall(func, ...)
+    local success, result = pcall(func, ...)
+    if not success then
+        warn("Safe call failed: " .. tostring(result))
+    end
+    return success, result
+end
 
--- Create sections
-local sections = {
-    MainSection = tabs.Main:Section({ Side = "Left" }),
-    SettingsSection = tabs.Settings:Section({ Side = "Left" }),
-    InfoSection = tabs.Info:Section({ Side = "Left" })
-}
+local function getEvents()
+    local events = ReplicatedStorage:FindFirstChild("Events")
+    if not events then
+        warn("Events not found in ReplicatedStorage")
+        return nil
+    end
+    return events
+end
 
--- Core functions
+-- Core Functionality
 local function getClosestMob()
     local closestMob = nil
     local closestDistance = math.huge
     
     for _, mob in ipairs(workspace:GetChildren()) do
-        if mob:IsA("Model") and mob ~= character and mob:FindFirstChild("HumanoidRootPart") and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 then
-            local dist = (mob.HumanoidRootPart.Position - humanoidRootPart.Position).Magnitude
-            if dist < closestDistance then
-                closestDistance = dist
+        if mob:IsA("Model") and 
+           mob ~= character and 
+           mob:FindFirstChild("HumanoidRootPart") and 
+           mob:FindFirstChild("Humanoid") and 
+           mob.Humanoid.Health > 0 then
+            
+            local distance = (mob.HumanoidRootPart.Position - humanoidRootPart.Position).Magnitude
+            if distance < closestDistance then
+                closestDistance = distance
                 closestMob = mob
             end
         end
@@ -127,25 +77,56 @@ local function getClosestMob()
     return closestMob, closestDistance
 end
 
-local function isInRange(mob, range)
-    if not mob or not mob:FindFirstChild("HumanoidRootPart") or not humanoidRootPart then 
-        return false 
-    end
-    return (mob.HumanoidRootPart.Position - humanoidRootPart.Position).Magnitude <= range
+local function equipWeapon()
+    if AutoFarmCore.weaponEquipped then return end
+    
+    safeCall(function()
+        local events = getEvents()
+        if events then
+            local weaponEvent = events:FindFirstChild("WeaponsEvent")
+            if weaponEvent then
+                weaponEvent:FireServer("Equip/UnEquip")
+                AutoFarmCore.weaponEquipped = true
+            end
+        end
+    end)
 end
 
-local function equipWeapon()
-    pcall(function()
-        local events = game:GetService("ReplicatedStorage"):WaitForChild("Events", 3)
-        if not events then warn("Events not found in ReplicatedStorage") return end
+local function teleportToMob(mob)
+    if not mob or not mob:FindFirstChild("HumanoidRootPart") or not humanoidRootPart then
+        return false
+    end
+    
+    safeCall(function()
+        local mobPosition = mob.HumanoidRootPart.Position
+        local targetPosition = mobPosition + Vector3.new(0, Settings.heightOffset, 0)
         
-        local weaponEvent = events:WaitForChild("WeaponsEvent", 3)
-        if not weaponEvent then warn("WeaponsEvent not found") return end
-        
-        local args = { [1] = "Equip/UnEquip" }
-        weaponEvent:FireServer(unpack(args))
-        weaponEquipped = true
+        humanoidRootPart.Anchored = true
+        humanoidRootPart.CFrame = CFrame.new(targetPosition, mobPosition)
     end)
+    
+    return true
+end
+
+local function attackEnemy()
+    local mob, distance = getClosestMob()
+    if not mob or distance > Settings.hitRange then
+        return false
+    end
+    
+    equipWeapon()
+    
+    safeCall(function()
+        local events = getEvents()
+        if events then
+            local combatEvent = events:FindFirstChild("Combat")
+            if combatEvent then
+                combatEvent:FireServer("Attack")
+            end
+        end
+    end)
+    
+    return true
 end
 
 local function useSkill(skillName)
@@ -154,525 +135,298 @@ local function useSkill(skillName)
     
     local targetPosition = mob.HumanoidRootPart.Position
     
-    pcall(function()
-        local events = game:GetService("ReplicatedStorage"):WaitForChild("Events", 3)
-        if not events then warn("Events not found in ReplicatedStorage") return end
-        
-        local skillEvent = events:WaitForChild("Skill", 3)
-        if not skillEvent then warn("Skill event not found") return end
-        
-        local args = {
-            [1] = { ["Skill"] = skillName, ["Function"] = "Activate" },
-            [2] = targetPosition,
-            [3] = true
-        }
-        skillEvent:FireServer(unpack(args))
-    end)
-end
-
-local function attackEnemy()
-    local mob, distance = getClosestMob()
-    if not mob or not mob:FindFirstChild("HumanoidRootPart") then return end
-    
-    if distance > HIT_RANGE * 1.5 then return end
-
-    local targetParts = {"HumanoidRootPart", "Torso", "UpperTorso", "Head", "LowerTorso"}
-    local targetPart = nil
-    
-    for _, partName in ipairs(targetParts) do
-        targetPart = mob:FindFirstChild(partName)
-        if targetPart then break end
-    end
-    
-    if not targetPart then return end
-    
-    if not weaponEquipped then
-        equipWeapon()
-    end
-    
-    pcall(function()
-        local events = game:GetService("ReplicatedStorage"):WaitForChild("Events", 3)
-        if not events then return end
-        
-        local combatEvent = events:FindFirstChild("Combat")
-        if combatEvent then
-            combatEvent:FireServer("Attack")
-        end
-    end)
-end
-
-local attackLoopRunning = false
-local function startAttackLoop()
-    if attackLoopRunning then return end
-    attackLoopRunning = true
-    
-    spawn(function()
-        while autoAttack or autoFarm do
-            attackEnemy()
-            task.wait(attackDelay)
-            if not (autoAttack or autoFarm) then break end
-        end
-        attackLoopRunning = false
-    end)
-end
-
-local orbitConnection = nil
-local function startOrbiting()
-    if orbitConnection then orbitConnection:Disconnect() end
-    
-    orbitConnection = runService.Heartbeat:Connect(function()
-        local mob = getClosestMob()
-        if mob and mob:FindFirstChild("HumanoidRootPart") and autoFarm and humanoidRootPart then
-            if not autoAttack then
-                autoAttack = true
-                startAttackLoop()
+    safeCall(function()
+        local events = getEvents()
+        if events then
+            local skillEvent = events:FindFirstChild("Skill")
+            if skillEvent then
+                skillEvent:FireServer(
+                    {["Skill"] = skillName, ["Function"] = "Activate"},
+                    targetPosition,
+                    true
+                )
             end
-            
-            pcall(function()
-                humanoidRootPart.Anchored = false
-                
-                orbitAngle = orbitAngle + 2.5
-                if orbitAngle >= 360 then orbitAngle = 0 end
-                
-                local angle = math.rad(orbitAngle)
-                local x = math.cos(angle) * orbitRadius
-                local z = math.sin(angle) * orbitRadius
-                
-                local mobPosition = mob.HumanoidRootPart.Position
-                local targetPosition = mobPosition + Vector3.new(x, heightOffset, z)
-                
-                humanoidRootPart.CFrame = CFrame.new(targetPosition, mobPosition)
-                humanoidRootPart.Anchored = true
-            end)
         end
     end)
+end
+
+-- Auto Farm System
+local function startAutoFarm()
+    if AutoFarmCore.enabled then return end
+    
+    AutoFarmCore.enabled = true
+    equipWeapon()
+    
+    -- Main teleport and attack loop
+    AutoFarmCore.teleportConnection = RunService.Heartbeat:Connect(function()
+        if not AutoFarmCore.enabled then return end
+        
+        local mob = getClosestMob()
+        if mob then
+            teleportToMob(mob)
+        end
+    end)
+    
+    -- Attack loop
+    AutoFarmCore.autoAttackLoop = task.spawn(function()
+        while AutoFarmCore.enabled do
+            attackEnemy()
+            task.wait(Settings.attackDelay)
+        end
+    end)
+    
+    -- Ability loop (if enabled)
+    if Settings.autoAbility then
+        task.spawn(function()
+            while AutoFarmCore.enabled and Settings.autoAbility do
+                for _, skill in ipairs(Settings.selectedSkills) do
+                    if not AutoFarmCore.enabled then break end
+                    useSkill(skill)
+                    task.wait(0.3)
+                end
+                task.wait(0.5)
+            end
+        end)
+    end
 end
 
 local function stopAutoFarm()
-    autoFarm = false
-    if not autoAttack then
-        attackLoopRunning = false
+    AutoFarmCore.enabled = false
+    
+    if AutoFarmCore.teleportConnection then
+        AutoFarmCore.teleportConnection:Disconnect()
+        AutoFarmCore.teleportConnection = nil
     end
+    
     if humanoidRootPart then
-        pcall(function() humanoidRootPart.Anchored = false end)
-    end
-    if orbitConnection then orbitConnection:Disconnect() end
-end
-
-local abilityLoop = nil
-local function toggleAbility(isEnabled)
-    abilityActive = isEnabled
-    if isEnabled then
-        if not abilityLoop then
-            abilityLoop = spawn(function()
-                while abilityActive do
-                    useSkill("FlurryOfBlows")
-                    task.wait(0.3)
-                    useSkill("BloodyCut")
-                    task.wait(0.3)
-                    useSkill("Invisibility")
-                    task.wait(0.4)
-                end
-            end)
-        end
-    else
-        abilityActive = false
-        abilityLoop = nil
+        safeCall(function()
+            humanoidRootPart.Anchored = false
+        end)
     end
 end
 
--- Main Tab UI Components
-pcall(function()
-    sections.MainSection:Header({
-        Text = "Welcome to Auto Farm Pro"
-    })
-    
-    sections.MainSection:Paragraph({
-        Header = "Farm Helper",
-        Body = "The ultimate farming solution. Toggle features below to begin."
-    })
+-- Create Wind UI Window
+local Window = WindUI:CreateWindow({
+    Title = "Auto Farm Pro",
+    Icon = "zap",
+    Author = "Farm Helper",
+    Folder = "AutoFarmPro",
+    Size = UDim2.fromOffset(580, 460),
+    Transparent = true,
+    Theme = "Dark",
+    Resizable = true,
+    SideBarWidth = 200,
+    ScrollBarEnabled = true,
+    User = {
+        Enabled = true,
+        Anonymous = false,
+    },
+})
 
-    sections.MainSection:Toggle({
-        Name = "Auto Farm",
-        Default = autoFarm,
-        Callback = function(Value)
-            autoFarm = Value
-            if Value then
-                if not weaponEquipped then equipWeapon() end
-                startOrbiting()
-                -- We're not using Options anymore as we've removed SaveManager
-            else
-                stopAutoFarm()
-            end
-        end,
-    }, "AutoFarm")
+-- Create Sections
+local MainSection = Window:Section({
+    Title = "Auto Farm Controls",
+    Icon = "settings",
+    Opened = true,
+})
 
-    sections.MainSection:Toggle({
-        Name = "Auto Attack",
-        Default = autoAttack,
-        Callback = function(Value)
-            autoAttack = Value
-            if Value then
-                if not weaponEquipped then equipWeapon() end
-                startAttackLoop()
-            end
-        end,
-    }, "AutoAttack")
+local SettingsSection = Window:Section({
+    Title = "Configuration",
+    Icon = "sliders",
+    Opened = false,
+})
 
-    sections.MainSection:Toggle({
-        Name = "Auto Ability",
-        Default = abilityActive,
-        Callback = function(Value)
-            toggleAbility(Value)
-        end,
-    }, "AutoAbility")
+-- Create Tabs
+local MainTab = Window:Tab({
+    Title = "Main Farm",
+    Icon = "zap",
+})
 
-    sections.MainSection:Divider()
-    
-    sections.MainSection:Header({
-        Text = "Quick Actions"
-    })
+local SettingsTab = Window:Tab({
+    Title = "Settings",
+    Icon = "settings",
+})
 
-    sections.MainSection:Button({
-        Name = "Equip Weapon",
-        Callback = function()
-            equipWeapon()
-            Window:Notify({
-                Title = "Weapon",
-                Description = "Weapon equipped successfully",
-                Lifetime = 3
-            })
-        end,
-    })
+local InfoTab = Window:Tab({
+    Title = "Information",
+    Icon = "info",
+})
 
-    sections.MainSection:Button({
-        Name = "Find Closest Mob",
-        Callback = function()
-            local mob, distance = getClosestMob()
-            if mob then
-                Window:Notify({
-                    Title = "Found Mob",
-                    Description = "Closest mob: " .. (mob.Name or "Unknown") .. " (Distance: " .. math.floor(distance) .. ")",
-                    Lifetime = 3
-                })
-            else
-                Window:Notify({
-                    Title = "No Mobs Found",
-                    Description = "Could not find any mobs nearby",
-                    Lifetime = 3
-                })
-            end
-        end,
-    })
-    
-    -- Adding some example elements from MacLib
-    sections.MainSection:Divider()
-    
-    sections.MainSection:Header({
-        Text = "Extra Features"
-    })
-    
-    -- Example keybind
-    sections.MainSection:Keybind({
-        Name = "Quick Toggle Farm",
-        Blacklist = false,
-        Callback = function(binded)
-            autoFarm = not autoFarm
-            if autoFarm then
-                if not weaponEquipped then equipWeapon() end
-                startOrbiting()
-            else
-                stopAutoFarm()
-            end
-            Window:Notify({
-                Title = "Auto Farm Pro",
-                Description = (autoFarm and "Enabled" or "Disabled") .. " farming with hotkey",
-                Lifetime = 3
-            })
-        end,
-        onBinded = function(bind)
-            Window:Notify({
-                Title = "Auto Farm Pro",
-                Description = "Successfully bound farm toggle to " .. tostring(bind.Name),
-                Lifetime = 3
-            })
-        end,
-    }, "FarmKeybind")
-    
-    -- Example colorpicker
-    sections.MainSection:Colorpicker({
-        Name = "Highlight Color",
-        Default = Color3.fromRGB(0, 255, 255),
-        Callback = function(color)
-            -- In a real implementation, this could highlight targets
-            Window:Notify({
-                Title = "Auto Farm Pro", 
-                Description = "Changed highlight color",
-                Lifetime = 2
-            })
-        end,
-    }, "HighlightColor")
-    
-    -- Example dropdown
-    local targetOptions = {
-        "Closest Enemy",
-        "Highest Level",
-        "Lowest Health",
-        "Most Valuable",
-        "Boss Enemies"
-    }
-    
-    sections.MainSection:Dropdown({
-        Name = "Target Priority",
-        Multi = false,
-        Required = true,
-        Options = targetOptions,
-        Default = 1,
-        Callback = function(Value)
-            Window:Notify({
-                Title = "Target Priority",
-                Description = "Set priority to: " .. Value,
-                Lifetime = 3
-            })
-        end,
-    }, "TargetDropdown")
-    
-    -- Multi-selection example
-    local skillOptions = {
-        "FlurryOfBlows",
-        "BloodyCut",
-        "Invisibility",
-        "RapidStrike",
-        "DeathBlow",
-        "ShadowStep",
-        "HealingAura"
-    }
-    
-    sections.MainSection:Dropdown({
-        Name = "Auto-Use Skills",
-        Search = true,
-        Multi = true,
-        Required = false,
-        Options = skillOptions,
-        Default = {"FlurryOfBlows", "BloodyCut", "Invisibility"},
-        Callback = function(Value)
-            local selectedSkills = {}
-            for Skill, State in next, Value do
-                table.insert(selectedSkills, Skill)
-            end
-            Window:Notify({
-                Title = "Skills Updated",
-                Description = "Selected skills: " .. table.concat(selectedSkills, ", "),
-                Lifetime = 3
-            })
-        end,
-    }, "SkillsDropdown")
-end)
-
--- Settings Tab
-pcall(function()
-    sections.SettingsSection:Header({
-        Text = "Auto Farm Settings"
-    })
-
-    sections.SettingsSection:Slider({
-        Name = "Orbit Radius",
-        Default = orbitRadius,
-        Minimum = 5,
-        Maximum = 20,
-        DisplayMethod = "Value",
-        Precision = 1,
-        Callback = function(Value)
-            orbitRadius = Value
+-- Main Tab Components
+local AutoFarmToggle = MainTab:Toggle({
+    Title = "Auto Farm",
+    Desc = "Enable unified auto farming (TP + Attack + Weapon)",
+    Icon = "play",
+    Type = "Checkbox",
+    Default = false,
+    Callback = function(state)
+        if state then
+            startAutoFarm()
+        else
+            stopAutoFarm()
         end
-    }, "OrbitRadius")
-
-    sections.SettingsSection:Slider({
-        Name = "Height Offset",
-        Default = heightOffset,
-        Minimum = 0,
-        Maximum = 10,
-        DisplayMethod = "Value",
-        Precision = 0.5,
-        Callback = function(Value)
-            heightOffset = Value
-        end
-    }, "HeightOffset")
-
-    sections.SettingsSection:Slider({
-        Name = "Attack Delay",
-        Default = attackDelay,
-        Minimum = 0.05,
-        Maximum = 1,
-        DisplayMethod = "Value",
-        Precision = 0.05,
-        Callback = function(Value)
-            attackDelay = Value
-        end
-    }, "AttackDelay")
-
-    sections.SettingsSection:Slider({
-        Name = "Hit Range",
-        Default = HIT_RANGE,
-        Minimum = 5,
-        Maximum = 20,
-        DisplayMethod = "Value",
-        Precision = 1,
-        Callback = function(Value)
-            HIT_RANGE = Value
-        end
-    }, "HitRange")
-    
-    sections.SettingsSection:Divider()
-    
-    sections.SettingsSection:Header({
-        Text = "Advanced Settings"
-    })
-    
-    -- Example input
-    sections.SettingsSection:Input({
-        Name = "Custom Enemy Filter",
-        Placeholder = "Enter enemy names...",
-        AcceptedCharacters = "All",
-        Callback = function(input)
-            Window:Notify({
-                Title = "Enemy Filter",
-                Description = "Custom filter applied: " .. input
-            })
-        end,
-        onChanged = function(input)
-            print("Filter being typed: " .. input)
-        end,
-    }, "EnemyFilter")
-    
-    -- Example alpha colorpicker
-    local alphaColorPicker = sections.SettingsSection:Colorpicker({
-        Name = "Orbit Visualization",
-        Default = Color3.fromRGB(255,0,0),
-        Alpha = 0.5,
-        Callback = function(color, alpha)
-            Window:Notify({
-                Title = "Visualization",
-                Description = "Updated orbit visualization settings"
-            })
-        end,
-    }, "OrbitVisualization")
-    
-    -- Example rainbow toggle
-    local rainbowActive = false
-    local rainbowConnection
-    local hue = 0
-    
-    sections.SettingsSection:Toggle({
-        Name = "Rainbow Effect",
-        Default = false,
-        Callback = function(value)
-            rainbowActive = value
-    
-            if rainbowActive then
-                rainbowConnection = game:GetService("RunService").RenderStepped:Connect(function(deltaTime)
-                    hue = (hue + deltaTime * 0.1) % 1
-                    alphaColorPicker:SetColor(Color3.fromHSV(hue, 1, 1))
-                end)
-            elseif rainbowConnection then
-                rainbowConnection:Disconnect()
-                rainbowConnection = nil
-            end
-            
-            Window:Notify({
-                Title = "Visual Effects",
-                Description = (value and "Enabled" or "Disabled") .. " rainbow effect",
-                Lifetime = 3
-            })
-        end,
-    }, "RainbowToggle")
-end)
-
--- Info Tab
-pcall(function()
-    sections.InfoSection:Header({
-        Text = "Auto Farm Pro"
-    })
-
-    sections.InfoSection:Paragraph({
-        Header = "Version",
-        Body = "Version 2.0\nA professional auto farming solution."
-    })
-    
-    sections.InfoSection:Paragraph({
-        Header = "Features",
-        Body = "• Automatic orbiting around enemies\n• Smart attacking with customizable delay\n• Auto ability usage\n• Customizable settings\n• Target prioritization\n• Visual effects and highlighting"
-    })
-
-    sections.InfoSection:Paragraph({
-        Header = "How to Use",
-        Body = "1. Enable Auto Farm to automatically orbit and attack nearby mobs\n2. Use Settings to customize orbit distance, height, and attack delay\n3. Toggle Auto Ability to use skills automatically\n4. Set up hotkeys for quick access to common functions"
-    })
-    
-    sections.InfoSection:Label({
-        Text = "Converted from Fluent UI to MacLib UI"
-    })
-    
-    sections.InfoSection:SubLabel({
-        Text = "For any issues or suggestions, please contact the developer"
-    })
-end)
-
-Window.onUnloaded(function()
-    if orbitConnection then orbitConnection:Disconnect() end
-    if humanoidRootPart then
-        pcall(function() humanoidRootPart.Anchored = false end)
     end
-    print("Auto Farm Pro unloaded!")
-end)
+})
 
-tabs.Main:Select()
+local AutoAbilityToggle = MainTab:Toggle({
+    Title = "Auto Abilities",
+    Desc = "Automatically use selected skills",
+    Icon = "sparkles",
+    Type = "Checkbox",
+    Default = false,
+    Callback = function(state)
+        Settings.autoAbility = state
+        if AutoFarmCore.enabled then
+            stopAutoFarm()
+            task.wait(0.1)
+            startAutoFarm()
+        end
+    end
+})
 
--- Apply settings immediately if enabled
-pcall(function()
-    if autoFarm then
+local SkillDropdown = MainTab:Dropdown({
+    Title = "Skills to Use",
+    Values = {"FlurryOfBlows", "BloodyCut", "Invisibility", "RapidStrike", "DeathBlow", "ShadowStep", "HealingAura"},
+    Value = {"FlurryOfBlows", "BloodyCut", "Invisibility"},
+    Multi = true,
+    AllowNone = false,
+    Callback = function(skills)
+        Settings.selectedSkills = {}
+        for skill, selected in pairs(skills) do
+            if selected then
+                table.insert(Settings.selectedSkills, skill)
+            end
+        end
+    end
+})
+
+-- Quick Action Buttons
+local EquipWeaponButton = MainTab:Button({
+    Title = "Equip Weapon",
+    Desc = "Manually equip weapon",
+    Callback = function()
+        AutoFarmCore.weaponEquipped = false
         equipWeapon()
-        startOrbiting()
-    elseif autoAttack then
-        equipWeapon()
-        startAttackLoop()
     end
+})
 
-    if abilityActive then
-        toggleAbility(true)
+local FindMobButton = MainTab:Button({
+    Title = "Find Closest Mob",
+    Desc = "Locate and display nearest enemy",
+    Callback = function()
+        local mob, distance = getClosestMob()
+        if mob then
+            print("Closest mob: " .. (mob.Name or "Unknown") .. " at distance: " .. math.floor(distance))
+        else
+            print("No mobs found nearby")
+        end
     end
-end)
+})
 
--- Handle character respawn
+local TeleportButton = MainTab:Button({
+    Title = "Teleport to Mob",
+    Desc = "Manually teleport to closest enemy",
+    Callback = function()
+        local mob = getClosestMob()
+        if mob then
+            teleportToMob(mob)
+        end
+    end
+})
+
+-- Settings Tab Components
+local AttackDelaySlider = SettingsTab:Slider({
+    Title = "Attack Delay",
+    Step = 0.05,
+    Value = {
+        Min = 0.05,
+        Max = 1.0,
+        Default = 0.1,
+    },
+    Callback = function(value)
+        Settings.attackDelay = value
+    end
+})
+
+local HitRangeSlider = SettingsTab:Slider({
+    Title = "Hit Range",
+    Step = 1,
+    Value = {
+        Min = 5,
+        Max = 30,
+        Default = 15,
+    },
+    Callback = function(value)
+        Settings.hitRange = value
+    end
+})
+
+local HeightOffsetSlider = SettingsTab:Slider({
+    Title = "Height Offset",
+    Step = 0.5,
+    Value = {
+        Min = -10,
+        Max = 5,
+        Default = -3,
+    },
+    Callback = function(value)
+        Settings.heightOffset = value
+    end
+})
+
+-- Target Priority Dropdown (for future use)
+local TargetPriorityDropdown = SettingsTab:Dropdown({
+    Title = "Target Priority",
+    Values = {"Closest Enemy", "Highest Level", "Lowest Health", "Most Valuable", "Boss Enemies"},
+    Value = "Closest Enemy",
+    Callback = function(priority)
+        print("Target priority set to: " .. priority)
+        -- Implementation for different targeting logic can be added here
+    end
+})
+
+-- Info Tab Components
+MainTab:Button({
+    Title = "Script Information",
+    Desc = "View details about Auto Farm Pro",
+    Callback = function()
+        Window:SelectTab(3) -- Switch to Info tab
+    end
+})
+
+-- Handle Character Respawn
 player.CharacterAdded:Connect(function(newCharacter)
     character = newCharacter
-    pcall(function()
-        humanoidRootPart = character:WaitForChild("HumanoidRootPart", 5)
-        if not humanoidRootPart then
-            warn("HumanoidRootPart not found after respawn")
-            return
-        end
-        
-        if autoFarm then
-            weaponEquipped = false
-            task.wait(1)
-            equipWeapon()
-            startOrbiting()
-        elseif autoAttack then
-            weaponEquipped = false
-            task.wait(1)
-            equipWeapon()
-            startAttackLoop()
-        end
-        
-        if abilityActive then
-            toggleAbility(true)
-        end
-    end)
+    humanoidRootPart = character:WaitForChild("HumanoidRootPart", 10)
+    
+    if not humanoidRootPart then
+        warn("Failed to get HumanoidRootPart after respawn")
+        return
+    end
+    
+    -- Reset weapon status
+    AutoFarmCore.weaponEquipped = false
+    
+    -- Restart auto farm if it was enabled
+    if AutoFarmCore.enabled then
+        task.wait(2) -- Wait for character to fully load
+        stopAutoFarm()
+        task.wait(0.5)
+        startAutoFarm()
+    end
 end)
 
-Window:Notify({
-    Title = "Auto Farm Pro",
-    Description = "Script loaded successfully!",
-    Lifetime = 5
-})
+-- Cleanup on script end
+game:GetService("GuiService").ErrorMessageChanged:Connect(function()
+    if AutoFarmCore.enabled then
+        stopAutoFarm()
+    end
+end)
+
+-- Initialize
+print("Auto Farm Pro loaded successfully!")
+print("Features: Unified Auto Farm (TP + Attack + Weapon Equip)")
+print("UI Library: Wind UI")
+
+-- Select main tab by default
+Window:SelectTab(1)
